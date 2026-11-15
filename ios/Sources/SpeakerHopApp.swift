@@ -109,6 +109,11 @@ struct MainView: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 .disabled(bridge.profile != 2)
+                Section("About") {
+                    NavigationLink("Privacy policy") { LocalDocument(name: "PrivacyPolicy", title: "Privacy policy") }
+                    NavigationLink("Open-source licenses") { LocalDocument(name: "Acknowledgements", title: "Open-source licenses") }
+                    Link("Support", destination: URL(string: "https://github.com/ryuya0124/SpeakerHop-iOS/issues")!)
+                }
             }
             .disabled(bridge.connecting || bridge.connected)
             .onDisappear { bridge.saveSettings() }
@@ -159,5 +164,20 @@ struct MainView: View {
     private func metric(_ name: String, _ key: String) -> some View {
         let value = (bridge.stats[key] as? NSNumber)?.doubleValue
         return LabeledContent(LocalizedStringKey(name), value: value.map { $0 < 0 ? String(localized: "Unavailable") : String(format: "%.2f ms", $0) } ?? "—")
+    }
+}
+
+private struct LocalDocument: View {
+    let name: String
+    let title: String
+    var body: some View {
+        ScrollView {
+            Text(contents).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading).padding()
+        }.navigationTitle(LocalizedStringKey(title))
+    }
+    private var contents: String {
+        guard let url = Bundle.main.url(forResource: name, withExtension: "txt"),
+            let text = try? String(contentsOf: url, encoding: .utf8) else { return "" }
+        return text
     }
 }

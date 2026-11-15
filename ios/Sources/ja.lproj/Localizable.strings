@@ -58,6 +58,10 @@
 "Late packets" = "期限を過ぎたパケット数";
 "These measurements do not establish acoustic end-to-end latency. Receiver targets and reported bounds are settings, not measurements of speaker playback. Capture block span overlaps delivery age; do not add them together." = "これらの値から、実際に音が出るまでの遅延は確定できません。受信側の目標や上下限は設定値です。取り込み単位の長さと到着時点の経過には重なりがあるため、足し合わせないでください。";
 "Unavailable" = "取得不可";
+"About" = "このアプリについて";
+"Privacy policy" = "プライバシーポリシー";
+"Open-source licenses" = "オープンソースライセンス";
+"Support" = "サポート";
 "Not connected" = "未接続";
 "Connecting, muted" = "ミュートで接続中";
 "Sharing device audio" = "端末の音声を共有中";

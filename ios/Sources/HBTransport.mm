@@ -16,7 +16,7 @@ using namespace fxchain;
 struct Session {
     RingBuffer<int16_t> ring{8192};
     std::atomic<bool> stop{false}, ready{false};
-    std::atomic<int> state{1}, volume{-1}, rate{44100};
+    std::atomic<int> state{1}, volume{-1}, rate{48000};
     std::atomic<uint64_t> frames{0}, dropped{0}, invalid{0};
     std::atomic<double> chunkMs{0}, ageMs{-1}, callbackMs{0}, intervalMs{0};
     double lastCallback = 0; // capture queue only
@@ -72,18 +72,21 @@ double hostSeconds() { return CMTimeGetSeconds(CMClockGetTime(CMClockGetHostTime
             sender.setAudioPacketFrames((uint32_t)packetFrames);
             sender.setIdentity(RaopIdentity{"SpeakerHop",source,"iPhone"});
             sender.attachRing(&s->ring);
-            sender.setInputFormat(44100);
-            sender.setInputBufferFrames(std::clamp((int)reserve,0,100)*44100/1000);
+            sender.setInputFormat(48000);
+            sender.setInputBufferFrames(std::clamp((int)reserve,0,100)*48000/1000);
             sender.setPresentationLatencyMs((uint32_t)presentation);
             sender.setReceiverLatencyRangeMs((uint32_t)minimum,(uint32_t)maximum);
             sender.setAuth(RaopDeviceInfo::Auth::HapTransient,true,id,{},{});
             sender.start(address,(uint16_t)port,label);
-            int rate=44100;
+            int rate=48000;
             bool inputReleased=false;
             auto nextStats=std::chrono::steady_clock::now();
             while(!s->stop.load() && s->state.load()>0) {
                 const int newRate=s->rate.load();
-                if(rate!=newRate) { rate=newRate; sender.setInputFormat(rate); }
+                if(rate!=newRate) {
+                    rate=newRate; sender.setInputFormat(rate);
+                    sender.setInputBufferFrames(std::clamp((int)reserve,0,100)*rate/1000);
+                }
                 if(!inputReleased && s->frames.load()>0) {
                     sender.releaseInput(); inputReleased=true;
                 }

@@ -180,7 +180,8 @@ extension BridgeModel: SCContentSharingPickerObserver, SCStreamDelegate {
             guard self.connecting || self.connected, self.stream == nil else { return }
             let config = SCStreamConfiguration()
             config.capturesAudio = true
-            config.sampleRate = 44100
+            // Use an explicitly supported native capture rate; convert once in the sender.
+            config.sampleRate = 48000
             config.channelCount = 2
             config.excludesCurrentProcessAudio = false
             let stream = SCStream(filter: filter, configuration: config, delegate: self)

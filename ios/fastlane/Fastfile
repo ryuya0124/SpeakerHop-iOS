@@ -7,10 +7,17 @@ IOS_ROOT = File.expand_path("..", __dir__)
 platform :ios do
   private_lane :prepare do |options|
     Dir.chdir(IOS_ROOT) do
+      sh("ruby", "tools/prepare-notices.rb")
       sh("bash", "build-native.sh", options[:simulator] ? "iphonesimulator" : "iphoneos")
       sh("swift", "tools/generate-icon.swift", "Assets.xcassets/AppIcon.appiconset/AppIcon.png")
       sh("/opt/homebrew/bin/xcodegen", "generate")
     end
+  end
+
+  desc "Capture actual app screens on owned simulators, sequentially and without audio"
+  lane :screenshots do
+    simulator
+    Dir.chdir(IOS_ROOT) { sh("ruby", "tools/capture-screenshots.rb") }
   end
 
   desc "Build a signed Release app for authorized physical-device debugging"
