@@ -1,0 +1,4 @@
+* text=auto eol=lf
+*.png binary
+# Preserve imported upstream whitespace and source attribution.
+third_party/** -whitespace

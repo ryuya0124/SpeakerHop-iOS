@@ -1,0 +1,54 @@
+name: SpeakerHop
+options:
+  bundleIdPrefix: dev.ryuya
+  deploymentTarget:
+    iOS: '27.0'
+settings:
+  base:
+    DEVELOPMENT_TEAM: FZ35ZF3CZV
+    SWIFT_VERSION: '5.0'
+    CLANG_CXX_LANGUAGE_STANDARD: c++20
+    CODE_SIGN_STYLE: Automatic
+    MARKETING_VERSION: 0.1.0
+    CURRENT_PROJECT_VERSION: 1
+    ARCHS[sdk=iphonesimulator*]: arm64
+targets:
+  SpeakerHop:
+    type: application
+    platform: iOS
+    sources:
+      - Sources
+      - Assets.xcassets
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.ryuya.speakerhop
+        TARGETED_DEVICE_FAMILY: '1,2'
+        SWIFT_OBJC_BRIDGING_HEADER: Sources/Bridge-Bridging-Header.h
+        HEADER_SEARCH_PATHS: '$(SRCROOT)/../third_party/airplay2-sender-cpp/src'
+        LIBRARY_SEARCH_PATHS: '$(SRCROOT)/build/native/$(PLATFORM_NAME)/lib'
+        OTHER_LDFLAGS: '$(inherited) -lraop_sender -lairplay_crypto -lapple_alac -led25519 -lmbedcrypto'
+        OTHER_LDFLAGS[sdk=iphoneos*]: '$(inherited) -framework ScreenCaptureKit'
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+    info:
+      path: Info.plist
+      properties:
+        CFBundleDisplayName: SpeakerHop
+        UILaunchScreen: {}
+        UIBackgroundModes: [screen-capture]
+        NSLocalNetworkUsageDescription: 'Discover HomePod speakers and send the audio you choose to share on your local network.'
+        NSBonjourServices: [_raop._tcp]
+        CFBundleURLTypes:
+          - CFBundleURLName: dev.ryuya.speakerhop.navigation
+            CFBundleURLSchemes: [speakerhop]
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
+        UISupportedInterfaceOrientations~ipad: [UIInterfaceOrientationPortrait, UIInterfaceOrientationPortraitUpsideDown, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
+    dependencies:
+      - sdk: AVFoundation.framework
+      - sdk: CoreMedia.framework
+      - sdk: AudioToolbox.framework
+      - sdk: libc++.tbd
+schemes:
+  SpeakerHop:
+    build:
+      targets:
+        SpeakerHop: all

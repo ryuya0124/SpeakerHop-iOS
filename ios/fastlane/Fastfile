@@ -1,0 +1,70 @@
+# frozen_string_literal: true
+require "json"
+require "fileutils"
+default_platform(:ios)
+IOS_ROOT = File.expand_path("..", __dir__)
+
+platform :ios do
+  private_lane :prepare do |options|
+    Dir.chdir(IOS_ROOT) do
+      sh("bash", "build-native.sh", options[:simulator] ? "iphonesimulator" : "iphoneos")
+      sh("swift", "tools/generate-icon.swift", "Assets.xcassets/AppIcon.appiconset/AppIcon.png")
+      sh("/opt/homebrew/bin/xcodegen", "generate")
+    end
+  end
+
+  desc "Build a signed Release app for authorized physical-device debugging"
+  lane :device do |options|
+    prepare
+    build_app(project: File.join(IOS_ROOT, "SpeakerHop.xcodeproj"), scheme: "SpeakerHop",
+      configuration: "Release", destination: "generic/platform=iOS",
+      derived_data_path: File.join(IOS_ROOT, "build/DerivedData"),
+      skip_archive: true, skip_package_ipa: true,
+      skip_codesigning: options[:unsigned].to_s == "true", xcargs: "-allowProvisioningUpdates")
+  end
+
+  desc "Build the adaptive SwiftUI interface for Apple Silicon simulators"
+  lane :simulator do
+    prepare(simulator: true)
+    build_app(project: File.join(IOS_ROOT, "SpeakerHop.xcodeproj"), scheme: "SpeakerHop",
+      configuration: "Release", destination: "generic/platform=iOS Simulator", sdk: "iphonesimulator",
+      derived_data_path: File.join(IOS_ROOT, "build/SimulatorData"),
+      skip_archive: true, skip_package_ipa: true, skip_codesigning: true)
+  end
+
+  desc "Create the SpeakerHop app record only; never submit for review"
+  lane :create_draft do
+    UI.user_error!("Set FASTLANE_USER to the existing developer account") unless ENV["FASTLANE_USER"]
+    produce(app_identifier: "dev.ryuya.speakerhop", app_name: "SpeakerHop",
+      sku: "speakerhop-ios", language: "Japanese", app_version: "0.1.0", team_id: "FZ35ZF3CZV")
+  end
+
+  desc "Prepare local English/Japanese metadata files for deliver"
+  lane :prepare_metadata do
+    data = JSON.parse(File.read(File.join(IOS_ROOT, "appstore/metadata.json")))
+    root = File.join(IOS_ROOT, "appstore/metadata")
+    FileUtils.mkdir_p(root)
+    File.write(File.join(root, "copyright.txt"), data.fetch("copyright"))
+    File.write(File.join(root, "primary_category.txt"), data.fetch("primaryCategory"))
+    data.fetch("localizations").each do |locale, values|
+      dir = File.join(root, locale)
+      FileUtils.mkdir_p(dir)
+      {"name"=>"name", "subtitle"=>"subtitle", "description"=>"description",
+       "promotionalText"=>"promotional_text", "keywords"=>"keywords", "supportUrl"=>"support_url"}.each do |key, file|
+        value = values.fetch(key)
+        File.write(File.join(dir, "#{file}.txt"), value)
+      end
+    end
+  end
+
+  desc "Upload metadata and verified screenshots to an editable draft; no binary or review submission"
+  lane :upload_draft do
+    prepare_metadata
+    screenshots = File.join(IOS_ROOT, "build/store-screenshots")
+    UI.user_error!("Capture and inspect actual app screenshots first") if Dir.glob(File.join(screenshots,"**/*.png")).empty?
+    deliver(app_identifier: "dev.ryuya.speakerhop", app_version: "0.1.0",
+      metadata_path: File.join(IOS_ROOT, "appstore/metadata"), screenshots_path: screenshots,
+      skip_binary_upload: true, submit_for_review: false, automatic_release: false,
+      force: true, overwrite_screenshots: false, run_precheck_before_submit: false)
+  end
+end

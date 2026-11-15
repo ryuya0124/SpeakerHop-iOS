@@ -1,0 +1,26 @@
+{
+  "bundleId": "dev.ryuya.speakerhop",
+  "sku": "speakerhop-ios",
+  "version": "0.1.0",
+  "primaryLocale": "ja",
+  "copyright": "2026 ryuya watanabe",
+  "primaryCategory": "MUSIC",
+  "localizations": {
+    "ja": {
+      "name": "SpeakerHop",
+      "subtitle": "端末の音声をスピーカーへ共有",
+      "promotionalText": "iPhone・iPadの共有可能な音声をHomePodへ。低遅延を重視した設定と、経路ごとの診断表示を用意しました。",
+      "description": "iPhoneやiPadの音声を、同じWi-FiのHomePodへ共有するアプリです。\n\nスピーカーを選び、iOSの画面共有ダイアログで共有を許可すると、共有可能な音声をHomePodへ送ります。映像をHomePodに送ることはありません。脱獄は不要です。\n\n・SwiftUIで作られたiPhone、iPad、iPhone Duo対応の画面\n・低遅延、安定、手動の3つの設定\n・送信前の待ち時間、パケット長、受信側の目標値を個別に調整\n・ロスレス圧縮のオン／オフ\n・取り込みや送信待ちの診断、受信側の拒否を表示\n・接続開始時はミュート、接続後に音量を調整\n\n【利用条件】\niOS／iPadOS 27以降と、同じローカルネットワークの対応HomePodが必要です。画面共有とローカルネットワークへのアクセスを許可してください。\n\n【共有できる音声について】\n音声の取り込み範囲はiOSと再生元アプリの制限に従います。保護されたコンテンツ、通話、一部アプリの音声は共有できない場合があります。マイク音声とカメラ映像は共有しません。端末のスピーカー音量は別に調整してください。\n\n実際の遅延や安定性は、端末、ネットワーク、スピーカーによって変わります。表示される受信目標値は、音が出るまでの実測時間ではありません。\n\nAppleの公式アプリではありません。HomePod、iPhone、iPad、AirPlayはApple Inc.の商標です。",
+      "keywords": "音声共有,スピーカー,低遅延,オーディオ,ミラーリング,WiFi,音楽",
+      "supportUrl": "https://github.com/ryuya0124/SpeakerHop-iOS/issues"
+    },
+    "en-US": {
+      "name": "SpeakerHop",
+      "subtitle": "Share your device audio",
+      "promotionalText": "Share eligible iPhone and iPad audio with HomePod, with adjustable latency settings and separate capture and sender diagnostics.",
+      "description": "Share eligible audio from your iPhone or iPad with a HomePod on the same Wi-Fi network. Select a speaker and approve sharing in the iOS system dialog. Only audio is sent to the speaker. No jailbreak is required.\n\nFEATURES\n• Native SwiftUI interface for iPhone, iPad, and iPhone Duo\n• Lowest-latency, stable, and manual profiles\n• Independent sender reserve, packet length, and receiver timing controls\n• Optional lossless compression\n• Capture and sender diagnostics, including receiver rejection\n• Every connection starts muted, with adjustable speaker volume\n\nREQUIREMENTS\niOS or iPadOS 27 or later, a compatible HomePod, and a shared local network. Screen sharing and Local Network access require your permission.\n\nCAPTURE LIMITATIONS\nAvailable audio depends on iOS and the source app. Protected content, calls, and some apps may not be captured. Microphone and camera content are excluded. Adjust the device's local speaker volume separately.\n\nActual latency and stability depend on the device, network, and receiver. Receiver target values are settings, not measurements of acoustic end-to-end latency.\n\nThis is an independent app, not an official Apple product. HomePod, iPhone, iPad, and AirPlay are trademarks of Apple Inc.",
+      "keywords": "audio,speaker,stream,latency,mirror,local,WiFi,music",
+      "supportUrl": "https://github.com/ryuya0124/SpeakerHop-iOS/issues"
+    }
+  }
+}
