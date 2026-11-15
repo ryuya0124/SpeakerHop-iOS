@@ -22,6 +22,13 @@ struct MainView: View {
         }
         .tabViewStyle(.sidebarAdaptable)
         .tint(.teal)
+        .onAppear {
+#if targetEnvironment(simulator)
+            let args = ProcessInfo.processInfo.arguments
+            if let index = args.firstIndex(of: "--layout-tab"), args.indices.contains(index + 1),
+                ["share", "latency", "diagnostics"].contains(args[index + 1]) { selectedTab = args[index + 1] }
+#endif
+        }
         .onOpenURL { url in
             if url.scheme == "speakerhop", let page = url.host,
                 ["share", "latency", "diagnostics"].contains(page) { selectedTab = page }

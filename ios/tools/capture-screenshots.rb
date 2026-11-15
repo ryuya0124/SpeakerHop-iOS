@@ -5,7 +5,7 @@ require "fileutils"
 
 def run(*args)
   out, err, status = Open3.capture3(*args)
-  raise "#{args.first(3).join(' ')} failed: #{err[-500,500]}" unless status.success?
+  raise "#{args.first(3).join(' ')} failed: #{err[-500..]}" unless status.success?
   out
 end
 
@@ -36,19 +36,19 @@ configs.each do |role, type, runtime|
     run("xcrun", "simctl", "status_bar", id, "override", "--time", "9:41", "--dataNetwork", "wifi", "--wifiMode", "active", "--wifiBars", "3", "--batteryState", "charged", "--batteryLevel", "100")
     %w[ja en-US].each do |locale|
       language = locale == "ja" ? "ja" : "en"
-      begin
-        run("xcrun", "simctl", "terminate", id, "dev.ryuya.speakerhop")
-      rescue StandardError
-        # A previously unlaunched app has nothing to terminate.
-      end
-      run("xcrun", "simctl", "launch", id, "dev.ryuya.speakerhop", "-AppleLanguages", "(#{language})", "-AppleLocale", locale)
       dir = File.join(root, "build", role == "Duo" ? "duo-layouts" : "store-screenshots", locale)
       FileUtils.mkdir_p(dir)
       %w[share latency diagnostics].each_with_index do |page, i|
-        run("xcrun", "simctl", "openurl", id, "speakerhop://#{page}")
+        begin
+          run("xcrun", "simctl", "terminate", id, "dev.ryuya.speakerhop")
+        rescue StandardError
+          # A previously unlaunched app has nothing to terminate.
+        end
+        run("xcrun", "simctl", "launch", id, "dev.ryuya.speakerhop", "-AppleLanguages", "(#{language})", "-AppleLocale", locale, "--layout-tab", page)
         # Allow the navigation animation to settle; image inspection is still mandatory afterward.
         sleep 1
-        run("xcrun", "simctl", "io", id, "screenshot", File.join(dir, "#{role}-#{i+1}-#{page}.png"))
+        display = role == "Duo" ? ["--display=primary"] : []
+        run("xcrun", "simctl", "io", id, "screenshot", *display, File.join(dir, "#{role}-#{i+1}-#{page}.png"))
       end
     end
   ensure

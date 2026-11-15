@@ -10,3 +10,5 @@ ios/fastlane/Preview.html
 ios/fastlane/README.md
 *.log
 __pycache__/
+ios/Sources/Acknowledgements.txt
+ios/Sources/PrivacyPolicy.txt
