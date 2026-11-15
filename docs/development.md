@@ -6,6 +6,8 @@ Standalone iOS repository: `ryuya0124/SpeakerHop-iOS`, separate from OneUI-Mods/
 
 Use fastlane, with the checked-in Gemfile.lock. The observed environment is Xcode 27.2, iPhoneOS/Simulator SDK 27.2 and fastlane 2.241.2. No jailbreak or other-app hooks are involved. ScreenCaptureKit's iOS 27 public capture API is absent from the simulator SDK, so the simulator compiles the same SwiftUI interface with capture unavailable. It cannot prove capture or playback.
 
+Full-display selection follows Apple's iOS sample (`picker.present()`) and the bundle declares localized screen-capture and local-network purpose descriptions. Microphone/camera controls remain hidden and no microphone output is attached.
+
 ## Validation completed
 
 - fastlane Release builds succeeded for physical iOS and Apple Silicon simulators.

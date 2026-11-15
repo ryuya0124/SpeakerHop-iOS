@@ -1,1 +1,2 @@
 "NSLocalNetworkUsageDescription" = "同じネットワークのHomePodを検索し、利用者が共有を許可した音声をスピーカーへ送信します。";
+"NSScreenCaptureUsageDescription" = "画面共有の許可により、共有可能な端末の音声を選択したスピーカーへ送信します。画面の映像は録画・送信しません。";

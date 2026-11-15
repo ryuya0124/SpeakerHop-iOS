@@ -36,6 +36,7 @@ targets:
         UILaunchScreen: {}
         UIBackgroundModes: [screen-capture]
         NSLocalNetworkUsageDescription: 'Discover HomePod speakers and send the audio you choose to share on your local network.'
+        NSScreenCaptureUsageDescription: 'Screen sharing lets SpeakerHop send eligible device audio to the speaker you select. Screen images are not recorded or transmitted.'
         NSBonjourServices: [_raop._tcp]
         CFBundleURLTypes:
           - CFBundleURLName: dev.ryuya.speakerhop.navigation

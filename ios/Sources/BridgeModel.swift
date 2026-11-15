@@ -99,7 +99,7 @@ final class BridgeModel: NSObject, ObservableObject {
         picker.defaultConfiguration = configuration
         picker.isActive = true
         // System-wide selection, never the current-application-only picker.
-        picker.present(using: .display)
+        picker.present()
 #else
         error = String(localized: "Screen audio sharing requires a physical iPhone or iPad with iOS 27.")
 #endif
