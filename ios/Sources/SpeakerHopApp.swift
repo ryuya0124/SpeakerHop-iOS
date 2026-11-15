@@ -91,14 +91,21 @@ struct MainView: View {
             Form {
                 Section("Profile") {
                     Picker("Profile", selection: Binding(get: { bridge.profile }, set: { bridge.applyProfile($0) })) {
-                        Text("Lowest latency").tag(0)
                         Text("Stable").tag(1)
+                        Text("Low latency").tag(0)
+                        Text("Ultra low").tag(3)
                         Text("Manual").tag(2)
                     }.pickerStyle(.segmented)
                     Text("Settings apply to the next connection. iOS controls the capture callback size; the app adds no extra capture queue.")
                         .font(.caption).foregroundStyle(.secondary)
                     if bridge.profile == 1 {
                         Text("Stable prioritizes continuous playback with a 1000 ms receiver target and 100 ms of input reserve. Expect a longer delay.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    } else if bridge.profile == 0 {
+                        Text("Low latency uses a 500 ms receiver target and 50 ms of input reserve.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    } else if bridge.profile == 3 {
+                        Text("Ultra low keeps the experimental 45 ms receiver target and 2 ms input reserve. Playback may break up on some networks or devices.")
                             .font(.caption).foregroundStyle(.secondary)
                     }
                 }
@@ -160,6 +167,7 @@ private struct DiagnosticsView: View {
                     metric("Capture callback interval", "interval")
                     metric("PCM conversion", "callback")
                     metric("Sender queue", "queue")
+                    metric("Input queue limit", "queueLimit")
                     metric("Actual packet span", "packetMs")
                     metric("Maximum encode time", "encode")
                     metric("Maximum socket send time", "socketSend")
@@ -182,6 +190,7 @@ private struct DiagnosticsView: View {
                     LabeledContent("Nonzero input samples", value: String((store.values["nonzeroSamples"] as? NSNumber)?.uint64Value ?? 0))
                     LabeledContent("Recovered scheduling stalls", value: String((store.values["recovered"] as? NSNumber)?.uint64Value ?? 0))
                     LabeledContent("Skipped expired audio frames", value: String((store.values["skipped"] as? NSNumber)?.uint64Value ?? 0))
+                    LabeledContent("Input trimmed to queue limit", value: String((store.values["trimmed"] as? NSNumber)?.uint64Value ?? 0))
                     LabeledContent("Receiver resend requests", value: String((store.values["resends"] as? NSNumber)?.uint64Value ?? 0))
                     LabeledContent("Socket send errors", value: String((store.values["sendErrors"] as? NSNumber)?.uint64Value ?? 0))
                     ForEach([("Captured frames", "frames"), ("Dropped frames", "dropped"), ("Invalid audio blocks", "invalid"), ("Missing input frames", "underruns"), ("Late packets", "late")], id: \.1) { label, key in

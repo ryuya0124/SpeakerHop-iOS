@@ -2,6 +2,25 @@
 import XCTest
 
 final class StoreScreenshots: XCTestCase {
+    func testLegacyLowPresetMigrationAndSelectionPersists() {
+        continueAfterFailure=false
+        let app=XCUIApplication()
+        app.launchArguments=["-AppleLanguages","(en)","--layout-tab","latency",
+            "--timing-settings-json","{\"profile\":0}"]
+        app.launch()
+        XCTAssertTrue(app.navigationBars["Latency"].waitForExistence(timeout:15))
+        XCTAssertTrue(app.segmentedControls.buttons["Ultra low"].isSelected)
+        app.segmentedControls.buttons["Low latency"].tap()
+        XCTAssertTrue(app.segmentedControls.buttons["Low latency"].isSelected)
+        XCTAssertTrue(app.staticTexts["Low latency uses a 500 ms receiver target and 50 ms of input reserve."].exists)
+        app.terminate()
+        app.launchArguments=["-AppleLanguages","(en)","--layout-tab","latency"]
+        app.launch()
+        XCTAssertTrue(app.navigationBars["Latency"].waitForExistence(timeout:15))
+        XCTAssertTrue(app.segmentedControls.buttons["Low latency"].isSelected)
+        app.terminate()
+    }
+
     func testLaunchWithMaximumManualBounds() {
         continueAfterFailure=false
         let app=XCUIApplication()
@@ -42,7 +61,7 @@ final class StoreScreenshots: XCTestCase {
             for (index, page) in ["share", "latency", "diagnostics"].enumerated() {
                 let app = XCUIApplication()
                 app.launchArguments = ["-AppleLanguages", locale == "ja" ? "(ja)" : "(en)",
-                    "-AppleLocale", locale, "--timing-settings-json", "{\"profile\":1}", "--layout-tab", page]
+                    "-AppleLocale", locale, "--timing-settings-json", "{}", "--layout-tab", page]
                 app.launch()
                 XCTAssertTrue(app.wait(for: .runningForeground, timeout: 15))
                 let expected = page == "share" ? "SpeakerHop" : page == "latency"

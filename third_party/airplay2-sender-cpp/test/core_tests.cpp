@@ -1711,11 +1711,60 @@ void testResamplerReserveAndLateRecovery() {
     r.advance(1000);
     size_t audio=0;
     for(const auto& dg:r.io.takeUdp())if(dg.s==RaopUdp::Audio)++audio;
-    CHECK(audio<=1,"suspension does not create an expired catch-up packet storm");
+    CHECK(audio<=6,"only the receiver's remaining future window is caught up after suspension");
     CHECK(r.sender->recoveredAudioGaps()==1 && r.sender->skippedLateAudioFrames()>40000,"expired source time is accounted for");
     r.advance(8);
     CHECK(r.sender->lastHandoffLeadMicros()>0,"new packets recover future deadlines");
     r.sender->stop();
+}
+
+void testRecoveryRetainsFutureWaveform() {
+    g_test = "late recovery preserves future PCM and fractional resampling phase";
+    for(uint32_t rate : {44100u,48000u}) for(uint32_t latency : {45u,500u}) {
+        Rig r;
+        r.sender->setInputFormat(rate);
+        r.sender->setInputBufferFrames(0);
+        r.sender->setPresentationLatencyMs(latency);
+        r.sender->setRecoverLateAudio(true);
+        if(rate==48000) {
+            runAp2Handshake(r,FakeReceiver::Mode::Ap2Transient,RaopDeviceInfo::Auth::HapTransient);
+        } else {
+            r.sender->setAuth(RaopDeviceInfo::Auth::None,false,"box","","");
+            r.sender->start(r.peerIp,5000,"FakeBox");r.connectControl();r.exchange();
+        }
+        REQUIRE(r.launchedOk && *r.launchedOk,"ready for recovery waveform test");
+        r.io.takeUdp();
+        auto sample=[&](size_t frame,int channel) {
+            return int16_t(12000*std::sin(6.283185307179586*(channel?1733:997)*double(frame)/rate));
+        };
+        std::vector<int16_t> source(30000*2);
+        for(size_t f=0;f<30000;++f)for(int c=0;c<2;++c)source[f*2+c]=sample(f,c);
+        REQUIRE(r.ring.tryPush(source),"captured source including future receiver budget queued");
+        r.advance(8);r.io.takeUdp();
+        r.advance(600);
+        auto packets=r.io.takeUdp();
+        auto first=std::find_if(packets.begin(),packets.end(),[](const auto& p){return p.s==RaopUdp::Audio;});
+        REQUIRE(first!=packets.end(),"still-timely audio is sent immediately after recovery");
+        auto pcm=r.rx.decodeAudio(first->data);
+        REQUIRE(pcm && pcm->size()==704,"recovered packet decrypts and decodes");
+        const auto skipped=r.sender->skippedLateAudioFrames();
+        if(latency==500)CHECK(skipped>4000 && skipped<6000,"500 ms budget does not discard the whole 600 ms stall");
+        int maxError=0;
+        for(size_t f=0;f<352;++f) {
+            const double phase=double(352+skipped+f)*rate/44100;
+            const size_t i=size_t(phase);
+            for(int c=0;c<2;++c) {
+                const auto a=sample(i,c),b=sample(i+1,c);
+                const int expected=int16_t(a+(b-a)*(phase-i));
+                maxError=std::max(maxError,std::abs(int((*pcm)[f*2+c])-expected));
+            }
+        }
+        CHECK(maxError<=1,"retained audio resumes at the correct sample and resampler phase");
+        CHECK(r.sender->queuedInputFrames()>0,"unexpired buffered input is retained");
+        CHECK(r.sender->inputUnderrunFrames()==0,"recovery does not replace retained audio with silence");
+        CHECK(r.sender->lastHandoffLeadMicros()>0,"retained packets still have future deadlines");
+        r.sender->stop();
+    }
 }
 
 void testInputJitterReserve() {
@@ -1767,6 +1816,82 @@ void testInputJitterReserve() {
         pcm = r.rx.decodeAudio(packet.data);
         CHECK(pcm && std::all_of(pcm->begin(), pcm->end(), [](int16_t v) { return v == 1000; }), "audio resumes after refilling reserve");
     }
+    r.sender->stop();
+}
+
+void testInputLimitKeepsNewestWaveform() {
+    g_test = "consumer queue trimming preserves newest stereo input and phase";
+    for(uint32_t rate : {44100u,48000u}) {
+        Rig r;
+        r.sender->setInputFormat(rate);
+        r.sender->setInputBufferFrames(0);
+        r.sender->setAuth(RaopDeviceInfo::Auth::None,false,"box","","");
+        r.sender->start(r.peerIp,5000,"FakeBox");r.connectControl();r.exchange();r.io.takeUdp();
+        auto block=[](size_t first,size_t count) {
+            std::vector<int16_t> samples(count*2);
+            for(size_t f=0;f<count;++f) {
+                samples[f*2]=int16_t((first+f)*4);
+                samples[f*2+1]=int16_t(-int(first+f)*4);
+            }
+            return samples;
+        };
+        REQUIRE(r.ring.tryPush(block(0,2000)),"initial source queued");
+        r.advance(8);r.io.takeUdp();
+        REQUIRE(r.ring.tryPush(block(2000,1000)),"fresh input behind staged source queued");
+        r.sender->setInputQueueLimitFrames(960);
+        r.advance(8);
+        auto packets=r.io.takeUdp();
+        auto first=std::find_if(packets.begin(),packets.end(),[](const auto& p){return p.s==RaopUdp::Audio;});
+        REQUIRE(first!=packets.end(),"packet after consumer trimming");
+        auto pcm=r.rx.decodeAudio(first->data);
+        REQUIRE(pcm && pcm->size()==704,"trimmed stereo packet decodes");
+        const double consumed=352.0*rate/44100;
+        const double fraction=consumed-size_t(consumed);
+        int error=0;
+        for(size_t f=0;f<352;++f) {
+            const double phase=2040+fraction+double(f)*rate/44100;
+            error=std::max(error,std::abs(int((*pcm)[f*2])-int16_t(phase*4)));
+            error=std::max(error,std::abs(int((*pcm)[f*2+1])-int16_t(-phase*4)));
+        }
+        CHECK(error<=1,"old staged and ring input are skipped while newest sample phase is preserved");
+        CHECK(r.sender->trimmedInputFrames()>1600 && r.sender->queuedInputFrames()<=960,"input queue is bounded by the consumer");
+        CHECK(r.sender->skippedLateAudioFrames()==0,"input backlog does not move the RTP clock");
+        r.sender->stop();
+    }
+}
+
+void testProducerContinuesAcrossSenderStall() {
+    g_test = "500 ms receiver budget preserves future audio across a 600 ms sender stall";
+    Rig r;
+    r.sender->setInputFormat(48000);
+    r.sender->setInputBufferFrames(2400);
+    r.sender->setInputQueueLimitFrames(570*48);
+    r.sender->setPresentationLatencyMs(500);
+    r.sender->setRecoverLateAudio(true);
+    r.sender->setAuth(RaopDeviceInfo::Auth::None,false,"box","","");
+    r.sender->start(r.peerIp,5000,"FakeBox");r.connectControl();r.exchange();r.io.takeUdp();
+    std::vector<int16_t> block(960*2,1234);
+    for(int ms=0;ms<200;++ms) {
+        if(ms%20==0)REQUIRE(r.ring.tryPush(block),"regular capture block fits");
+        r.advance(1);r.io.takeUdp();
+    }
+    // Capture continues on its own queue while the network thread is blocked.
+    for(int ms=0;ms<600;ms+=20) {
+        REQUIRE(r.ring.tryPush(block),"fresh capture is not rejected in favor of expired input");
+        r.now+=std::chrono::milliseconds(20);
+    }
+    r.sender->tick();r.io.takeUdp();
+    for(int ms=0;ms<80;++ms) {
+        if(ms%20==0)REQUIRE(r.ring.tryPush(block),"capture resumes during catch-up");
+        r.advance(1);
+        for(const auto& packet:r.io.takeUdp()) if(packet.s==RaopUdp::Audio) {
+            auto pcm=r.rx.decodeAudio(packet.data);
+            CHECK(pcm && std::all_of(pcm->begin(),pcm->end(),[](int16_t v){return v==1234;}),"future audio stays continuous after catch-up");
+        }
+    }
+    CHECK(r.sender->recoveredAudioGaps()==1,"one stall causes one deadline recovery");
+    CHECK(r.sender->inputUnderrunFrames()==0,"retained future input avoids extra silence after the stall");
+    CHECK(r.sender->trimmedInputFrames()==0,"deadline recovery precedes queue-limit trimming");
     r.sender->stop();
 }
 
@@ -2229,6 +2354,9 @@ int main() {
     testResampler();
     testResamplerWaveformContinuity();
     testResamplerReserveAndLateRecovery();
+    testRecoveryRetainsFutureWaveform();
+    testInputLimitKeepsNewestWaveform();
+    testProducerContinuesAcrossSenderStall();
     testInputJitterReserve();
     testLowLatencyTimeline();
     testAp2LatencyNegotiation();

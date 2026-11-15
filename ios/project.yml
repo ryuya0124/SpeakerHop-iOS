@@ -10,7 +10,7 @@ settings:
     CLANG_CXX_LANGUAGE_STANDARD: c++20
     CODE_SIGN_STYLE: Automatic
     MARKETING_VERSION: 0.1.0
-    CURRENT_PROJECT_VERSION: 3
+    CURRENT_PROJECT_VERSION: 4
     ARCHS[sdk=iphonesimulator*]: arm64
 targets:
   SpeakerHop:

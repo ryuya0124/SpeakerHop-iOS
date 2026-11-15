@@ -28,6 +28,12 @@
 "Socket send errors" = "ソケット送信エラー数";
 "Profile" = "モード";
 "Lowest latency" = "低遅延";
+"Low latency" = "低遅延";
+"Ultra low" = "超低遅延";
+"Low latency uses a 500 ms receiver target and 50 ms of input reserve." = "低遅延モードは受信目標500 ms・入力バッファ50 msです。";
+"Ultra low keeps the experimental 45 ms receiver target and 2 ms input reserve. Playback may break up on some networks or devices." = "超低遅延モードは従来の低遅延設定を引き継ぎ、受信目標45 ms・入力バッファ2 msです。端末やネットワークによって音が途切れる場合があります。";
+"Input queue limit" = "保持できる入力待ちの上限";
+"Input trimmed to queue limit" = "入力待ちの上限に合わせて破棄したフレーム数";
 "Stable" = "安定";
 "Stable prioritizes continuous playback with a 1000 ms receiver target and 100 ms of input reserve. Expect a longer delay." = "安定モードは連続再生を優先し、受信目標1000 ms・入力バッファ100 msで余裕を持たせます。再生までの遅延は長くなります。";
 "Fixed at this value" = "この値に固定されます";

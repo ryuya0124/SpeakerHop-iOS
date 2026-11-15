@@ -475,6 +475,7 @@ void RaopSender::start(const std::string& host, uint16_t port, const std::string
     inputPrimed_ = false;
     inputUnderrunFrames_ = bufferingFrames_ = rebufferCount_ = 0;
     recoveredAudioGaps_ = skippedLateAudioFrames_ = 0;
+    trimmedInputFrames_ = 0;
     silentInputFrames_ = adaptiveBufferChanges_ = trimmedSilentFrames_ = 0;
     rawAudioBytes_ = encodedAudioBytes_ = maximumEncodeMicros_ = 0;
     minimumHandoffLeadMicros_ = lastHandoffLeadMicros_ = 0;
@@ -2069,22 +2070,26 @@ void RaopSender::onPacerTick_() {
     // presentation deadlines already expired. Keep RTP time monotonic and abandon
     // only obsolete input, rather than growing an unrecoverable pacing debt.
     if (recoverLateAudio_ && target > framesSent_ + latency_) {
-        const auto resume = target / packetFrames_ * packetFrames_;
+        // Discard only audio whose presentation deadline has expired. Audio
+        // still covered by the receiver's latency budget can be caught up.
+        const auto firstFuture = target - latency_ + packetFrames_;
+        const auto resume = std::min(target / packetFrames_ * packetFrames_,
+            (firstFuture + packetFrames_ - 1) / packetFrames_ * packetFrames_);
+        discardInputFrames_(double(resume - framesSent_) * inputRate_ / kRaopRate);
         skippedLateAudioFrames_ += resume - framesSent_;
         ++recoveredAudioGaps_;
         framesSent_ = resume;
-        inBuf_.clear(); srcPhase_ = 0;
-        inputPrimed_ = false;
-        if (ring_) {
-            std::array<int16_t, 1024> discarded{};
-            size_t remaining = ring_->availableRead();
-            while (remaining > 0) {
-                const size_t take = std::min(remaining, discarded.size());
-                if (!ring_->tryPop(std::span<int16_t>(discarded.data(),take))) break;
-                remaining -= take;
-            }
-        }
         sendSyncPacket_(false);
+    }
+    // The consumer owns trimming. A capture producer must not reject the newest
+    // blocks while the sender is stalled: the oldest blocks may expire first.
+    if (inputQueueLimitFrames_ > 0) {
+        const size_t queued = queuedInputFrames();
+        if (queued > inputQueueLimitFrames_) {
+            const size_t excess = queued - inputQueueLimitFrames_;
+            discardInputFrames_(double(excess));
+            trimmedInputFrames_ += excess;
+        }
     }
     int sentThisTick = 0;
     while (framesSent_ + packetFrames_ <= target
@@ -2236,10 +2241,35 @@ void RaopSender::sendAudioPacket_() {
     framesSent_ += packetFrames_;
 }
 
-size_t RaopSender::queuedInputFrames() const {
+size_t RaopSender::stagedInputFrames() const {
     const size_t staged = inBuf_.size() / kChannels;
     const size_t consumed = std::min(staged, size_t(srcPhase_));
-    return (ring_ ? ring_->availableRead() / kChannels : 0) + staged - consumed;
+    return staged - consumed;
+}
+
+size_t RaopSender::queuedInputFrames() const {
+    return (ring_ ? ring_->availableRead() / kChannels : 0) + stagedInputFrames();
+}
+
+void RaopSender::discardInputFrames_(double sourceFrames) {
+    const double phase = srcPhase_ + sourceFrames;
+    size_t remaining = size_t(phase);
+    const double fraction = phase - remaining;
+    const size_t staged = std::min(remaining, inBuf_.size() / kChannels);
+    if (staged > 0)
+        inBuf_.erase(inBuf_.begin(), inBuf_.begin() + std::ptrdiff_t(staged * kChannels));
+    remaining -= staged;
+    const size_t ringFrames = ring_ ? ring_->availableRead() / kChannels : 0;
+    size_t discard = std::min(remaining, ringFrames);
+    const bool missing = discard < remaining;
+    std::array<int16_t, 1024> scratch{};
+    while (discard > 0) {
+        const size_t take = std::min(discard, scratch.size() / kChannels);
+        if (!ring_->tryPop(std::span<int16_t>(scratch.data(), take * kChannels))) break;
+        discard -= take;
+    }
+    srcPhase_ = missing ? 0 : fraction;
+    if (queuedInputFrames() == 0) inputPrimed_ = false;
 }
 
 size_t RaopSender::fillFrames_(int16_t* dst, size_t want) {

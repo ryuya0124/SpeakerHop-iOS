@@ -68,7 +68,9 @@ final class BridgeModel: NSObject, ObservableObject {
            let fixture = try? JSONSerialization.jsonObject(with: data) as? [String: Any] { settings = fixture }
 #endif
         if let saved = settings {
-            profile = min(2, max(0, saved["profile"] as? Int ?? 0))
+            let savedProfile = min(3, max(0, saved["profile"] as? Int ?? 1))
+            // Previous low-latency settings are now named Ultra low.
+            profile = savedProfile == 0 && (saved["presetSchema"] as? Int ?? 1) < 2 ? 3 : savedProfile
             presentation = min(2000, max(45, saved["presentation"] as? Double ?? 45))
             receiverMinimum = min(2000, max(45, saved["minimum"] as? Double ?? 45))
             receiverMaximum = min(2000, max(receiverMinimum, saved["maximum"] as? Double ?? 45))
@@ -96,18 +98,18 @@ final class BridgeModel: NSObject, ObservableObject {
     func applyProfile(_ value: Int) {
         profile = value
         guard value != 2 else { saveSettings(); return }
-        presentation = value == 0 ? 45 : 1000
+        presentation = value == 3 ? 45 : value == 0 ? 500 : 1000
         receiverMinimum = presentation
         receiverMaximum = presentation
-        reserve = value == 0 ? 2 : 100
+        reserve = value == 3 ? 2 : value == 0 ? 50 : 100
         packetFrames = 352
         compressed = false
-        networkPriority = value == 0
+        networkPriority = value == 3
         saveSettings()
     }
 
     func saveSettings() {
-        UserDefaults.standard.set(["profile": profile, "presentation": presentation,
+        UserDefaults.standard.set(["presetSchema": 2, "profile": profile, "presentation": presentation,
             "minimum": receiverMinimum, "maximum": receiverMaximum, "reserve": reserve,
             "packet": packetFrames, "compressed": compressed, "networkPriority": networkPriority], forKey: "timingSettings")
     }

@@ -175,6 +175,10 @@ public:
     uint64_t inputUnderrunFrames() const { return inputUnderrunFrames_; }
     uint64_t bufferingFrames() const { return bufferingFrames_; }
     size_t queuedInputFrames() const;
+    size_t stagedInputFrames() const;
+    // Source-rate frames, configured by the owning sender thread. Zero disables.
+    void setInputQueueLimitFrames(size_t frames) { inputQueueLimitFrames_ = frames; }
+    uint64_t trimmedInputFrames() const { return trimmedInputFrames_; }
     uint64_t rebufferCount() const { return rebufferCount_; }
     void setRecoverLateAudio(bool enabled) { recoverLateAudio_ = enabled; }
     uint64_t recoveredAudioGaps() const { return recoveredAudioGaps_; }
@@ -361,6 +365,7 @@ private:
     void sendAudioPacket_();
     std::string encodeAlacFrame_(const int16_t* frames, int nFrames);   // #90 ALAC, one 352-frame packet
     size_t fillFrames_(int16_t* dst, size_t want); // ring -> 44.1 kHz frames
+    void discardInputFrames_(double sourceFrames);
     void sendSyncPacket_(bool first);
     void onControlDatagram_(std::span<const uint8_t> dg, const RaopEndpoint& from);  // retransmit requests
     void onTimingDatagram_(std::span<const uint8_t> dg, const RaopEndpoint& from);   // timing requests
@@ -473,6 +478,8 @@ private:
     std::vector<int16_t> inBuf_;   // unconsumed input samples (interleaved)
     size_t   inReadFrames_ = 0;    // consumed frames at inBuf_'s front
     double   srcPhase_ = 0.0;      // fractional input-frame position
+    size_t inputQueueLimitFrames_ = 0;
+    uint64_t trimmedInputFrames_ = 0;
 
     // -- retransmit backlog (last 1024 packets, slot = seq & 0x3FF) ---
     std::vector<std::string> backlog_;

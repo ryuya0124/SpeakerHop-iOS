@@ -16,9 +16,9 @@
 namespace {
 using namespace fxchain;
 struct Session {
-    // Accommodate the entire supported 100 ms manual reserve plus source-block jitter.
-    // The producer still uses a per-session watermark, so this adds no fixed delay.
-    RingBuffer<int16_t> ring{32768};
+    // Capacity covers the largest supported receiver budget. No fixed prefill:
+    // each session retains only audio still covered by its presentation budget.
+    RingBuffer<int16_t> ring{262144};
     int queueLimitMs=40; // initialized before publishing the session
     std::atomic<bool> stop{false}, ready{false};
     std::atomic<int> state{1}, volume{-1}, rate{48000};
@@ -39,7 +39,7 @@ struct Session {
     uint64_t workgroupErrors=0;
     int networkClass=-1;
     uint64_t underruns=0, late=0;
-    uint64_t recovered=0, skipped=0, resends=0, sendErrors=0;
+    uint64_t recovered=0, skipped=0, resends=0, sendErrors=0, trimmed=0;
     int rejection=0;
     bool fallback=false;
     std::thread worker;
@@ -62,7 +62,7 @@ double threadSeconds() {
       packetFrames:(NSInteger)packetFrames compressed:(BOOL)compressed networkPriority:(BOOL)networkPriority {
     [self disconnect];
     auto s=std::make_shared<Session>();
-    s->queueLimitMs=std::max(40,int(std::clamp((int)reserve,0,100))+20);
+    s->queueLimitMs=std::clamp((int)presentation,45,2000)+std::clamp((int)reserve,0,100)+20;
     std::atomic_store(&_session, s);
     std::string address=host.UTF8String, label=name.UTF8String;
     std::string id=deviceID.UTF8String, source=sourceID.UTF8String;
@@ -96,6 +96,7 @@ double threadSeconds() {
             sender.attachRing(&s->ring);
             sender.setInputFormat(48000);
             sender.setInputBufferFrames(std::clamp((int)reserve,0,100)*48000/1000);
+            sender.setInputQueueLimitFrames(s->queueLimitMs*48000/1000);
             sender.setPresentationLatencyMs((uint32_t)presentation);
             sender.setReceiverLatencyRangeMs((uint32_t)minimum,(uint32_t)maximum);
             sender.setAuth(RaopDeviceInfo::Auth::HapTransient,true,id,{},{});
@@ -113,6 +114,7 @@ double threadSeconds() {
                 if(rate!=newRate) {
                     rate=newRate; sender.setInputFormat(rate);
                     sender.setInputBufferFrames(std::clamp((int)reserve,0,100)*rate/1000);
+                    sender.setInputQueueLimitFrames(s->queueLimitMs*rate/1000);
                 }
                 if(!inputReleased && s->frames.load()>0) {
                     // Activate only after authentication and real source input, not during SRP.
@@ -139,6 +141,8 @@ double threadSeconds() {
                 s->ready=sender.transportReady();
                 auto now=std::chrono::steady_clock::now();
                 if(now>=nextStats) {
+                    const auto network=loop.networkStatistics();
+                    const auto rtt=loop.tcpRttMicros(RaopTcp::Control);
                     std::lock_guard lock(s->mutex);
                     s->queuedMs=1000.0*sender.queuedInputFrames()/rate;
                     s->encodeMs=sender.maximumEncodeMicros()/1000.0;
@@ -163,10 +167,9 @@ double threadSeconds() {
                     s->late=sender.lateHandoffPackets();
                     s->recovered=sender.recoveredAudioGaps();
                     s->skipped=sender.skippedLateAudioFrames();
+                    s->trimmed=sender.trimmedInputFrames();
                     s->resends=sender.requestedResendPackets();
                     s->fallback=sender.latencyCompatibilityFallback();
-                    const auto network=loop.networkStatistics();
-                    const auto rtt=loop.tcpRttMicros(RaopTcp::Control);
                     s->networkClass=(int)network[11];
                     s->sendErrors=network[1];
                     s->sendMs=network[2]/1000.0;
@@ -229,8 +232,9 @@ double threadSeconds() {
         s->inputPeakDb=peak?20*std::log10(peak/32768.0):-120;
         s->nonzeroSamples.fetch_add(nonzero);
         s->rate=(int)asbd->mSampleRate;
-        // Bound stale audio: discard new input on overload rather than accumulating seconds of delay.
-        if(s->ring.availableRead()>asbd->mSampleRate*2*s->queueLimitMs/1000 || !s->ring.tryPush({pcm.data(),(size_t)n*2}))
+        // Preserve fresh input during a network stall. The sender discards old
+        // input after checking its deadlines and queue budget; capacity is finite.
+        if(!s->ring.tryPush({pcm.data(),(size_t)n*2}))
             s->dropped.fetch_add(n);
         else s->frames.fetch_add(n);
         s->chunkMs=n*1000.0/asbd->mSampleRate;
@@ -261,11 +265,13 @@ double threadSeconds() {
       @"captureAge":@(s->ageMs.load()),@"captureChunk":@(s->chunkMs.load()),
       @"callback":@(s->callbackMs.load()),@"interval":@(s->intervalMs.load()),
       @"queue":@(s->queuedMs),@"encode":@(s->encodeMs),@"presentation":@(s->presentationMs),
+      @"queueLimit":@(s->queueLimitMs),
       @"minimum":@(s->minimumMs),@"maximum":@(s->maximumMs),@"lead":@(s->leadMs),@"packetMs":@(s->packetMs),
       @"rtt":@(s->rttMs),@"socketSend":@(s->sendMs),@"networkClass":@(s->networkClass),
       @"loopWall":@(s->loopWallMs),@"loopCpu":@(s->loopCpuMs),@"pumpHz":@(s->pumpHz),@"stalledLoops":@(s->stalledLoops),@"qosResult":@(s->qosResult.load()),
       @"deadlineScheduling":@(s->deadlineScheduling),@"deadlinePolicy":@(s->deadlinePolicy),@"workgroupResult":@(s->workgroupResult),@"workgroupErrors":@(s->workgroupErrors),
       @"recovered":@(s->recovered),@"skipped":@(s->skipped),@"resends":@(s->resends),@"sendErrors":@(s->sendErrors),
+      @"trimmed":@(s->trimmed),
       @"underruns":@(s->underruns),@"late":@(s->late),@"rejection":@(s->rejection),@"fallback":@(s->fallback)};
 }
 - (void)dealloc { [self disconnect]; }
