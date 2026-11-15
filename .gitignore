@@ -12,3 +12,12 @@ ios/fastlane/README.md
 __pycache__/
 ios/Sources/Acknowledgements.txt
 ios/Sources/PrivacyPolicy.txt
+ios/appstore/metadata/
+ios/appstore/draft-verification.json
+ios/appstore/testflight-status.json
+ios/appstore/testflight-groups.json
+ios/profiles/
+*.mobileprovision
+*.p8
+*.p12
+*.ipa

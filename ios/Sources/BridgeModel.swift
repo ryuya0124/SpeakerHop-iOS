@@ -26,14 +26,16 @@ final class BridgeModel: NSObject, ObservableObject {
     let audioSession = SharingAudioSession()
     var stats: [String: Any] { telemetry.values }
     @Published var error = ""
-    @Published var profile = 0
-    @Published var presentation = 45.0
-    @Published var receiverMinimum = 45.0
-    @Published var receiverMaximum = 45.0
-    @Published var reserve = 2.0
+    @Published var profile = 1
+    @Published var presentation = 1000.0
+    @Published var receiverMinimum = 1000.0 {
+        didSet { if receiverMaximum < receiverMinimum { receiverMaximum = receiverMinimum } }
+    }
+    @Published var receiverMaximum = 1000.0
+    @Published var reserve = 100.0
     @Published var packetFrames = 352
     @Published var compressed = false
-    @Published var networkPriority = true
+    @Published var networkPriority = false
     private var transport = HBTransport()
     private let audioQueue = DispatchQueue(label: "dev.ryuya.speakerhop.capture", qos: .userInteractive)
 #if canImport(ScreenCaptureKit)
@@ -56,7 +58,16 @@ final class BridgeModel: NSObject, ObservableObject {
             UserDefaults.standard.set(sourceID, forKey: "senderDeviceID")
         }
         super.init()
-        if let saved = UserDefaults.standard.dictionary(forKey: "timingSettings") {
+        var settings = UserDefaults.standard.dictionary(forKey: "timingSettings")
+#if targetEnvironment(simulator)
+        // Typed JSON fixtures exercise real numeric settings without relying on
+        // NSArgumentDomain's string-valued legacy property-list dictionaries.
+        let launchArguments = ProcessInfo.processInfo.arguments
+        if let index = launchArguments.firstIndex(of: "--timing-settings-json"), launchArguments.indices.contains(index + 1),
+           let data = launchArguments[index + 1].data(using: .utf8),
+           let fixture = try? JSONSerialization.jsonObject(with: data) as? [String: Any] { settings = fixture }
+#endif
+        if let saved = settings {
             profile = min(2, max(0, saved["profile"] as? Int ?? 0))
             presentation = min(2000, max(45, saved["presentation"] as? Double ?? 45))
             receiverMinimum = min(2000, max(45, saved["minimum"] as? Double ?? 45))
@@ -85,10 +96,10 @@ final class BridgeModel: NSObject, ObservableObject {
     func applyProfile(_ value: Int) {
         profile = value
         guard value != 2 else { saveSettings(); return }
-        presentation = value == 0 ? 45 : 250
+        presentation = value == 0 ? 45 : 1000
         receiverMinimum = presentation
         receiverMaximum = presentation
-        reserve = value == 0 ? 2 : 20
+        reserve = value == 0 ? 2 : 100
         packetFrames = 352
         compressed = false
         networkPriority = value == 0

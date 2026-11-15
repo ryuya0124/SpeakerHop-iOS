@@ -97,6 +97,10 @@ struct MainView: View {
                     }.pickerStyle(.segmented)
                     Text("Settings apply to the next connection. iOS controls the capture callback size; the app adds no extra capture queue.")
                         .font(.caption).foregroundStyle(.secondary)
+                    if bridge.profile == 1 {
+                        Text("Stable prioritizes continuous playback with a 1000 ms receiver target and 100 ms of input reserve. Expect a longer delay.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
                 }
                 Section("HomePod timing") {
                     numeric("Presentation target", value: $bridge.presentation, range: 45...2000)
@@ -134,7 +138,11 @@ struct MainView: View {
     private func numeric(_ title: String, value: Binding<Double>, range: ClosedRange<Double>) -> some View {
         VStack(alignment: .leading) {
             HStack { Text(LocalizedStringKey(title)); Spacer(); Text("\(Int(value.wrappedValue)) ms").monospacedDigit() }
-            Slider(value: value, in: range, step: 1)
+            if range.lowerBound < range.upperBound {
+                Slider(value: value, in: range, step: 1).accessibilityIdentifier(title + "-slider")
+            } else {
+                Text("Fixed at this value").font(.caption).foregroundStyle(.secondary)
+            }
         }.disabled(bridge.profile != 2)
     }
 
@@ -159,6 +167,7 @@ private struct DiagnosticsView: View {
                     metric("CPU time in that cycle", "loopCpu")
                     metric("Control TCP round trip", "rtt")
                     LabeledContent("Streaming network class", value: networkClass)
+                    LabeledContent("Audio deadline scheduling", value: store.values["deadlineScheduling"] == nil ? "—" : (store.values["deadlineScheduling"] as? Bool) == true ? String(localized: "Active") : String(localized: "System fallback"))
                 }
                 Section("Receiver negotiation") {
                     metric("Applied presentation target", "presentation")

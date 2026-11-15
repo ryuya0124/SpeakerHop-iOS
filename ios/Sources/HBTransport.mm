@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #import "HBTransport.h"
+#include "AudioDeadlineScheduler.hpp"
 #import <AudioToolbox/AudioToolbox.h>
 #include "raop_sender.h"
 #include "raop_loop.h"
@@ -33,6 +34,9 @@ struct Session {
     double loopWallMs=0, loopCpuMs=0, pumpHz=0;
     uint64_t stalledLoops=0;
     std::atomic<int> qosResult{0};
+    bool deadlineScheduling=false;
+    int deadlinePolicy=-1, workgroupResult=-1;
+    uint64_t workgroupErrors=0;
     int networkClass=-1;
     uint64_t underruns=0, late=0;
     uint64_t recovered=0, skipped=0, resends=0, sendErrors=0;
@@ -98,6 +102,7 @@ double threadSeconds() {
             sender.start(address,(uint16_t)port,label);
             int rate=48000;
             bool inputReleased=false;
+            std::unique_ptr<AudioDeadlineScheduler> audioSchedule;
             double maximumLoopWall=0, maximumLoopCpu=0;
             uint64_t stalledLoops=0;
             auto nextStats=std::chrono::steady_clock::now();
@@ -110,6 +115,8 @@ double threadSeconds() {
                     sender.setInputBufferFrames(std::clamp((int)reserve,0,100)*rate/1000);
                 }
                 if(!inputReleased && s->frames.load()>0) {
+                    // Activate only after authentication and real source input, not during SRP.
+                    audioSchedule=std::make_unique<AudioDeadlineScheduler>((uint32_t)packetFrames);
                     sender.releaseInput(); inputReleased=true;
                 }
                 int volume=s->volume.exchange(-1);
@@ -118,7 +125,9 @@ double threadSeconds() {
                 // A 1 ms idle cap adds ~1000 wakeups/s without advancing an 8 ms packet deadline.
                 const bool measure=sender.transportReady();
                 const auto loopBegin=hostSeconds(), cpuBegin=threadSeconds();
+                if(audioSchedule)audioSchedule->begin();
                 loop.pump(sender,std::chrono::milliseconds(20));
+                if(audioSchedule)audioSchedule->finish();
                 ++pumps;
                 const double loopWall=(hostSeconds()-loopBegin)*1000;
                 const double cpuEnd=threadSeconds();
@@ -142,6 +151,12 @@ double threadSeconds() {
                     s->loopWallMs=maximumLoopWall;
                     s->loopCpuMs=maximumLoopCpu;
                     s->stalledLoops=stalledLoops;
+                    s->deadlineScheduling=audioSchedule && audioSchedule->active();
+                    if(audioSchedule) {
+                        s->deadlinePolicy=audioSchedule->policyResult();
+                        s->workgroupResult=audioSchedule->groupResult();
+                        s->workgroupErrors=audioSchedule->intervalErrors();
+                    }
                     const double seconds=std::chrono::duration<double>(now-statsBegan).count();
                     s->pumpHz=seconds>0?pumps/seconds:0;
                     pumps=0; statsBegan=now;
@@ -159,6 +174,7 @@ double threadSeconds() {
                     nextStats=now+std::chrono::milliseconds(200);
                 }
             }
+            audioSchedule.reset();
             sender.setVolume(0);
             sender.stop();
         } catch(const std::exception& e) {
@@ -248,6 +264,7 @@ double threadSeconds() {
       @"minimum":@(s->minimumMs),@"maximum":@(s->maximumMs),@"lead":@(s->leadMs),@"packetMs":@(s->packetMs),
       @"rtt":@(s->rttMs),@"socketSend":@(s->sendMs),@"networkClass":@(s->networkClass),
       @"loopWall":@(s->loopWallMs),@"loopCpu":@(s->loopCpuMs),@"pumpHz":@(s->pumpHz),@"stalledLoops":@(s->stalledLoops),@"qosResult":@(s->qosResult.load()),
+      @"deadlineScheduling":@(s->deadlineScheduling),@"deadlinePolicy":@(s->deadlinePolicy),@"workgroupResult":@(s->workgroupResult),@"workgroupErrors":@(s->workgroupErrors),
       @"recovered":@(s->recovered),@"skipped":@(s->skipped),@"resends":@(s->resends),@"sendErrors":@(s->sendErrors),
       @"underruns":@(s->underruns),@"late":@(s->late),@"rejection":@(s->rejection),@"fallback":@(s->fallback)};
 }

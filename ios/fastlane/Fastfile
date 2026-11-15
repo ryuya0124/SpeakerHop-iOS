@@ -5,6 +5,16 @@ default_platform(:ios)
 IOS_ROOT = File.expand_path("..", __dir__)
 
 platform :ios do
+  desc "Exercise native audio deadlines and restore thread policy without playing audio"
+  lane :scheduling_test do
+    Dir.chdir(IOS_ROOT) do
+      FileUtils.mkdir_p("build")
+      sh("xcrun", "--sdk", "macosx", "clang++", "-std=c++20", "-O2", "-fobjc-arc",
+        "-framework", "AudioToolbox", "Tests/audio-deadline-smoke.mm", "-o", "build/audio-deadline-smoke")
+      sh("build/audio-deadline-smoke")
+    end
+  end
+
   private_lane :prepare do |options|
     Dir.chdir(IOS_ROOT) do
       sh("ruby", "tools/prepare-notices.rb")
@@ -56,6 +66,137 @@ platform :ios do
       skip_codesigning: options[:unsigned].to_s == "true", xcargs: "-allowProvisioningUpdates")
   end
 
+  desc "Archive the beta unsigned; use the existing distribution identity in the login session"
+  lane :archive_beta do
+    prepare
+    build_app(project: File.join(IOS_ROOT, "SpeakerHop.xcodeproj"), scheme: "SpeakerHop",
+      configuration: "Release", destination: "generic/platform=iOS",
+      derived_data_path: File.join(IOS_ROOT, "build/DerivedData"),
+      archive_path: File.join(IOS_ROOT, "build/SpeakerHop.xcarchive"),
+      skip_package_ipa: true, skip_codesigning: true)
+  end
+
+  desc "Obtain this app's App Store profile for the existing distribution certificate"
+  lane :store_profile do
+    require "spaceship"
+    require "openssl"
+    require "base64"
+    Spaceship::ConnectAPI.login(ENV.fetch("FASTLANE_USER"), nil, portal_team_id: "FZ35ZF3CZV")
+    cert = Spaceship::ConnectAPI::Certificate.all(filter: {certificateType: "DISTRIBUTION,IOS_DISTRIBUTION"}).find do |item|
+      OpenSSL::Digest::SHA1.hexdigest(Base64.decode64(item.certificate_content)).upcase == "DEBA19E7B63B61A69D4D00D3165199B0619D1E2F"
+    end
+    UI.user_error!("Existing distribution certificate was not found; do not create or revoke identities") unless cert
+    get_provisioning_profile(app_identifier: "dev.ryuya.speakerhop", team_id: "FZ35ZF3CZV",
+      cert_id: cert.id, provisioning_name: "SpeakerHop App Store",
+      output_path: File.join(IOS_ROOT, "profiles"), filename: "SpeakerHop-AppStore.mobileprovision")
+  end
+
+  desc "Prepare external main and internal testing groups; never submit App Store review"
+  lane :beta_group do |options|
+    require "spaceship"
+    if options[:api_key_path]
+      Spaceship::ConnectAPI.token = Spaceship::ConnectAPI::Token.from_json_file(options[:api_key_path])
+    else
+      Spaceship::ConnectAPI.login(ENV.fetch("FASTLANE_USER"), nil, use_portal: false)
+    end
+    app = Spaceship::ConnectAPI::App.get(app_id: "6835134732")
+    UI.user_error!("Unexpected app") unless app.bundle_id == "dev.ryuya.speakerhop"
+    groups = app.get_beta_groups
+    internal = groups.find { |g| g.name == "internal" }
+    main = groups.find { |g| g.name == "main" }
+    if main && main.is_internal_group
+      UI.user_error!("Both internal placeholders exist; preserve them for inspection") if internal
+      internal = main.update(attributes: {name: "internal"})
+      main = nil
+    end
+    internal ||= app.create_beta_group(group_name: "internal", is_internal_group: true,
+      public_link_enabled: nil, public_link_limit: nil, public_link_limit_enabled: nil,
+      has_access_to_all_builds: false)
+    main ||= app.create_beta_group(group_name: "main", is_internal_group: false,
+      public_link_enabled: false, public_link_limit: nil, public_link_limit_enabled: nil)
+    UI.user_error!("Unexpected testing group types") unless internal.is_internal_group && !main.is_internal_group
+    begin
+      main = main.update(attributes: {public_link_enabled: true})
+    rescue Spaceship::UnexpectedResponse => error
+      raise unless error.message.match?(/build|review|public link/i)
+      UI.important("Public link activation awaits an eligible beta build")
+    end
+    report = {main: {internal: main.is_internal_group, publicLink: main.public_link},
+      internal: {internal: internal.is_internal_group}}
+    File.write(File.join(IOS_ROOT, "appstore/testflight-groups.json"), JSON.pretty_generate(report))
+    UI.success("Verified external main and internal TestFlight groups")
+  end
+
+  desc "Read uploaded beta processing and group state, without changing encryption declarations"
+  lane :beta_status do |options|
+    require "spaceship"
+    UI.user_error!("Pass api_key_path:") unless options[:api_key_path]
+    Spaceship::ConnectAPI.token = Spaceship::ConnectAPI::Token.from_json_file(options[:api_key_path])
+    app = Spaceship::ConnectAPI::App.get(app_id: "6835134732")
+    UI.user_error!("Unexpected app") unless app.bundle_id == "dev.ryuya.speakerhop"
+    builds = Spaceship::ConnectAPI::Build.all(app_id: app.id, version: "0.1.0", build_number: options[:build_number] || "3", includes: "preReleaseVersion,buildBetaDetail,betaGroups")
+    groups = app.get_beta_groups
+    membership = groups.to_h { |g| [g.name, g.fetch_builds.map(&:id)] }
+    report = {groups: groups.map { |g| {name: g.name, internal: g.is_internal_group, publicLink: g.public_link} },
+      builds: builds.map { |b| {version: b.pre_release_version&.version, build: b.version,
+        processing: b.processing_state, usesNonExemptEncryption: b.uses_non_exempt_encryption,
+        beta: {internal: b.build_beta_detail&.internal_build_state, external: b.build_beta_detail&.external_build_state},
+        groups: membership.select { |_, ids| ids.include?(b.id) }.keys} }}
+    File.write(File.join(IOS_ROOT, "appstore/testflight-status.json"), JSON.pretty_generate(report))
+    UI.success("Beta status read back")
+  end
+
+  desc "Upload only the explicitly supplied distribution IPA; never submit a review"
+  lane :beta_upload do |options|
+    UI.user_error!("Pass ipa: explicitly") unless options[:ipa]
+    upload = {ipa: File.expand_path(options[:ipa], IOS_ROOT),
+      app_identifier: "dev.ryuya.speakerhop", apple_id: "6835134732",
+      skip_waiting_for_build_processing: true, skip_submission: true,
+      distribute_external: false, notify_external_testers: false}
+    key_path = options[:api_key_path] || ENV["APP_STORE_CONNECT_API_KEY_PATH"]
+    upload[:api_key_path] = File.expand_path(key_path) if key_path
+    upload_to_testflight(**upload)
+  end
+
+  desc "Check whether the existing upload credential is available, without revealing it"
+  lane :beta_auth_check do
+    require "fastlane_core/itunes_transporter"
+    account = CredentialsManager::AccountManager.new(user: ENV.fetch("FASTLANE_USER"),
+      prefix: FastlaneCore::ItunesTransporter::TWO_STEP_HOST_PREFIX, note: "application-specific")
+    UI.message("Existing application-specific upload credential available: #{!account.password(ask_if_missing: false).to_s.empty?}")
+  end
+
+  desc "Register the already identified account owner in this app's internal group"
+  lane :beta_internal_owner do
+    require "spaceship"
+    Spaceship::ConnectAPI.login(ENV.fetch("FASTLANE_USER"), nil, use_portal: false)
+    app = Spaceship::ConnectAPI::App.get(app_id: "6835134732")
+    UI.user_error!("Unexpected app") unless app.bundle_id == "dev.ryuya.speakerhop"
+    owner = JSON.parse(File.read(File.join(IOS_ROOT, "auth/internal-owner.json"))).fetch("attributes")
+    UI.user_error!("Unexpected account owner") unless owner.fetch("username") == ENV.fetch("FASTLANE_USER") && owner.fetch("roles").include?("ACCOUNT_HOLDER")
+    group = app.get_beta_groups.find { |g| g.name == "internal" && g.is_internal_group }
+    UI.user_error!("Internal group missing") unless group
+    response = group.post_bulk_beta_tester_assignments(beta_testers: [{email: owner.fetch("username"),
+      firstName: owner.fetch("firstName"), lastName: owner.fetch("lastName")}])
+    File.write(File.join(IOS_ROOT, "auth/internal-assignment-result.json"), JSON.generate(response.body))
+    UI.success("Internal account-owner registration requested")
+  end
+
+  desc "Register the declared standard cryptography for the authorized TestFlight-only rollout"
+  lane :beta_encryption do |options|
+    UI.user_error!("Pass french_store:false explicitly for the current TestFlight-only rollout") unless options[:french_store].to_s == "false"
+    require "spaceship"
+    Spaceship::ConnectAPI.login(ENV.fetch("FASTLANE_USER"), nil, use_portal: false)
+    app = Spaceship::ConnectAPI::App.get(app_id: "6835134732")
+    UI.user_error!("Unexpected app") unless app.bundle_id == "dev.ryuya.speakerhop"
+    builds = Spaceship::ConnectAPI::Build.all(app_id: app.id, version: "0.1.0", build_number: options[:build_number] || "3")
+    UI.user_error!("Expected one processed build") unless builds.size == 1 && builds.first.processing_state == "VALID"
+    # Apple requires no encryption declaration document for published standard
+    # third-party cryptography without proprietary algorithms or French App Store distribution.
+    builds.first.update(attributes: {uses_non_exempt_encryption: false}) if builds.first.uses_non_exempt_encryption.nil?
+    UI.success("Recorded document exemption for the explicitly declared non-French standard-cryptography rollout")
+  end
+
   desc "Build the adaptive SwiftUI interface for Apple Silicon simulators"
   lane :simulator do
     prepare(simulator: true)
@@ -103,5 +244,33 @@ platform :ios do
       metadata_path: File.join(IOS_ROOT, "appstore/metadata"), screenshots_path: screenshots,
       skip_binary_upload: true, submit_for_review: false, automatic_release: false,
       force: true, overwrite_screenshots: false, run_precheck_before_submit: false)
+  end
+
+  desc "Save privacy answers as a draft, then read back this app's store record"
+  lane :verify_draft do
+    upload_app_privacy_details_to_app_store(app_identifier: "dev.ryuya.speakerhop",
+      json_path: File.join(IOS_ROOT, "appstore/app-data-usages.json"), skip_publish: true)
+    require "spaceship"
+    data = JSON.parse(File.read(File.join(IOS_ROOT, "appstore/metadata.json")))
+    app = Spaceship::ConnectAPI::App.get(app_id: data.fetch("appleId"))
+    UI.user_error!("Unexpected app record") unless app.bundle_id == data.fetch("bundleId")
+    version = app.get_app_store_versions(filter: {platform: "IOS", versionString: data.fetch("version")}).first
+    UI.user_error!("Expected an editable draft") unless version && version.app_store_state == "PREPARE_FOR_SUBMISSION"
+    localizations = version.get_app_store_version_localizations.map do |loc|
+      expected = data.fetch("localizations")[loc.locale]
+      UI.user_error!("Description readback mismatch for #{loc.locale}") if expected && loc.description != expected.fetch("description")
+      sets = loc.get_app_screenshot_sets.map do |set|
+        shots = set.app_screenshots || []
+        UI.user_error!("Screenshot processing incomplete") unless shots.all?(&:complete?)
+        {display: set.screenshot_display_type, count: shots.size}
+      end
+      {locale: loc.locale, descriptionCharacters: loc.description.to_s.length, screenshots: sets}
+    end
+    UI.user_error!("Expected both localizations") unless (data.fetch("localizations").keys - localizations.map { |l| l[:locale] }).empty?
+    UI.user_error!("Expected twelve screenshots") unless localizations.sum { |l| l[:screenshots].sum { |s| s[:count] } } == 12
+    report = {appleId: app.id, bundleId: app.bundle_id, version: version.version_string,
+      state: version.app_store_state, localizations: localizations, privacyPublished: false}
+    File.write(File.join(IOS_ROOT, "appstore/draft-verification.json"), JSON.pretty_generate(report))
+    UI.success("Verified editable SpeakerHop draft, both descriptions and twelve processed screenshots")
   end
 end

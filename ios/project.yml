@@ -10,7 +10,7 @@ settings:
     CLANG_CXX_LANGUAGE_STANDARD: c++20
     CODE_SIGN_STYLE: Automatic
     MARKETING_VERSION: 0.1.0
-    CURRENT_PROJECT_VERSION: 1
+    CURRENT_PROJECT_VERSION: 3
     ARCHS[sdk=iphonesimulator*]: arm64
 targets:
   SpeakerHop:
@@ -33,6 +33,8 @@ targets:
       path: Info.plist
       properties:
         CFBundleDisplayName: SpeakerHop
+        CFBundleShortVersionString: '$(MARKETING_VERSION)'
+        CFBundleVersion: '$(CURRENT_PROJECT_VERSION)'
         UILaunchScreen: {}
         UIBackgroundModes: [screen-capture, audio]
         NSLocalNetworkUsageDescription: 'Discover HomePod speakers and send the audio you choose to share on your local network.'

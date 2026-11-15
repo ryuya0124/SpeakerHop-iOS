@@ -1,5 +1,6 @@
 {
   "bundleId": "dev.ryuya.speakerhop",
+  "appleId": "6835134732",
   "sku": "speakerhop-ios",
   "version": "0.1.0",
   "primaryLocale": "ja",

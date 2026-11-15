@@ -2,6 +2,23 @@
 import XCTest
 
 final class StoreScreenshots: XCTestCase {
+    func testLaunchWithMaximumManualBounds() {
+        continueAfterFailure=false
+        let app=XCUIApplication()
+        app.launchArguments=["-AppleLanguages","(en)","--timing-settings-json",
+            "{\"profile\":2,\"presentation\":2000,\"minimum\":2000,\"maximum\":2000,\"reserve\":100,\"packet\":352}",
+            "--layout-tab","latency"]
+        app.launch()
+        XCTAssertTrue(app.navigationBars["Latency"].waitForExistence(timeout:15))
+        for _ in 0..<4 {
+            if app.staticTexts["Fixed at this value"].isHittable { break }
+            app.swipeUp()
+        }
+        XCTAssertTrue(app.staticTexts["Fixed at this value"].isHittable)
+        XCTAssertTrue(app.wait(for:.runningForeground,timeout:5))
+        app.terminate()
+    }
+
     func testDiagnosticsScrollWithLiveUpdates() {
         let app=XCUIApplication()
         app.launchArguments=["-AppleLanguages","(en)","--layout-tab","diagnostics","--simulate-sharing"]
@@ -25,7 +42,7 @@ final class StoreScreenshots: XCTestCase {
             for (index, page) in ["share", "latency", "diagnostics"].enumerated() {
                 let app = XCUIApplication()
                 app.launchArguments = ["-AppleLanguages", locale == "ja" ? "(ja)" : "(en)",
-                    "-AppleLocale", locale, "--layout-tab", page]
+                    "-AppleLocale", locale, "--timing-settings-json", "{\"profile\":1}", "--layout-tab", page]
                 app.launch()
                 XCTAssertTrue(app.wait(for: .runningForeground, timeout: 15))
                 let expected = page == "share" ? "SpeakerHop" : page == "latency"

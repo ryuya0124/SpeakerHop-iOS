@@ -1,0 +1,4 @@
+{
+  "ja": "安定モードを初期設定にし、受信目標1000 ms・入力バッファ100 msで連続再生を優先しました。上限値での起動クラッシュと共有中の診断スクロールを修正しています。音切れは引き続き改善中です。",
+  "en-US": "Stable is the default, with a 1000 ms receiver target and 100 ms input reserve. Fixes startup at maximum receiver settings and scrolling live diagnostics. Occasional audio interruptions remain under investigation."
+}

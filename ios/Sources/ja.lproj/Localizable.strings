@@ -19,6 +19,8 @@
 "System output volume" = "システムの出力音量";
 "Longest sender cycle" = "最長の送信処理周期";
 "CPU time in that cycle" = "その周期でCPUを使った時間";
+"Audio deadline scheduling" = "音声用の期限スケジューリング";
+"System fallback" = "標準スケジューリング";
 "This is the system volume, separate from the HomePod slider. iOS does not let SpeakerHop automatically mute other apps. If lowering this also silences capture, restore it and use the HomePod slider for listening volume." = "HomePodの音量とは別のシステム音量です。iOSでは他のアプリの音だけを自動ミュートできません。下げると共有音声も消える場合は元に戻し、聴く音量はHomePod側で調整してください。";
 "Recovered scheduling stalls" = "送信停止からの復帰回数";
 "Skipped expired audio frames" = "期限切れで破棄したフレーム数";
@@ -27,6 +29,8 @@
 "Profile" = "モード";
 "Lowest latency" = "低遅延";
 "Stable" = "安定";
+"Stable prioritizes continuous playback with a 1000 ms receiver target and 100 ms of input reserve. Expect a longer delay." = "安定モードは連続再生を優先し、受信目標1000 ms・入力バッファ100 msで余裕を持たせます。再生までの遅延は長くなります。";
+"Fixed at this value" = "この値に固定されます";
 "Manual" = "手動";
 "Settings apply to the next connection. iOS controls the capture callback size; the app adds no extra capture queue." = "次の接続から適用します。取り込み単位はiOSが決めます。アプリ内に追加の取り込み待ちは設けません。";
 "HomePod timing" = "HomePodの待ち時間";
