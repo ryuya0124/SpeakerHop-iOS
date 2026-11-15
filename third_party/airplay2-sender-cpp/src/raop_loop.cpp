@@ -407,13 +407,17 @@ void RaopLoop::udpSend(RaopUdp which, const RaopEndpoint& to, std::span<const ui
     if(which==RaopUdp::Audio && u.tx.active && u.sends%16==0)u.tx.drain(u.fd);
 #endif
     const auto begin=std::chrono::steady_clock::now();
+    int udpFlags = kSendFlags;
+#ifdef MSG_DONTWAIT
+    udpFlags |= MSG_DONTWAIT;
+#endif
 #if defined(__linux__)
     const auto sent=which==RaopUdp::Audio
-        ?u.tx.send(u.fd,bytes.data(),bytes.size(),kSendFlags,addr)
-        : ::sendto(u.fd,bytes.data(),bytes.size(),kSendFlags,reinterpret_cast<const sockaddr*>(&addr),sizeof(addr));
+        ?u.tx.send(u.fd,bytes.data(),bytes.size(),udpFlags,addr)
+        : ::sendto(u.fd,bytes.data(),bytes.size(),udpFlags,reinterpret_cast<const sockaddr*>(&addr),sizeof(addr));
 #else
     const auto sent=::sendto(u.fd,reinterpret_cast<const char*>(bytes.data()),buflen_t(bytes.size()),
-        kSendFlags,reinterpret_cast<const sockaddr*>(&addr),sizeof(addr));
+        udpFlags,reinterpret_cast<const sockaddr*>(&addr),sizeof(addr));
 #endif
     ++u.sends;if(sent<0 || size_t(sent)!=bytes.size())++u.errors;
     const auto micros=std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now()-begin).count();

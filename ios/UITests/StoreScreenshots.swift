@@ -2,6 +2,22 @@
 import XCTest
 
 final class StoreScreenshots: XCTestCase {
+    func testDiagnosticsScrollWithLiveUpdates() {
+        let app=XCUIApplication()
+        app.launchArguments=["-AppleLanguages","(en)","--layout-tab","diagnostics","--simulate-sharing"]
+        app.launch()
+        XCTAssertTrue(app.navigationBars["Diagnostics"].waitForExistence(timeout:15))
+        let footer=app.staticTexts["diagnostics-footer"]
+        for _ in 0..<8 {
+            if footer.isHittable { break }
+            app.swipeUp()
+        }
+        XCTAssertTrue(footer.isHittable,"Live diagnostics can scroll to the last row")
+        let reset=XCTNSPredicateExpectation(predicate:NSPredicate { _,_ in !footer.isHittable },object:nil)
+        reset.isInverted=true
+        XCTAssertEqual(XCTWaiter.wait(for:[reset],timeout:3),.completed,"Metric updates preserve scroll position")
+        app.terminate()
+    }
     func testStorePages() {
         continueAfterFailure = false
         XCUIDevice.shared.orientation = .portrait

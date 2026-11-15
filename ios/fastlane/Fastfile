@@ -29,7 +29,7 @@ platform :ios do
       configuration: "Release", parallel_testing: false, disable_concurrent_testing: true,
       result_bundle: true, result_bundle_path: options[:result],
       output_directory: File.dirname(options[:result]), xcargs: "CODE_SIGNING_ALLOWED=NO",
-      only_testing: ["SpeakerHopUITests/StoreScreenshots/testStorePages"])
+      only_testing: ["SpeakerHopUITests/StoreScreenshots/#{options[:test] || 'testStorePages'}"])
   end
 
   desc "Verify and install this app on one explicitly selected authorized device"

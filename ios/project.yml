@@ -34,7 +34,7 @@ targets:
       properties:
         CFBundleDisplayName: SpeakerHop
         UILaunchScreen: {}
-        UIBackgroundModes: [screen-capture]
+        UIBackgroundModes: [screen-capture, audio]
         NSLocalNetworkUsageDescription: 'Discover HomePod speakers and send the audio you choose to share on your local network.'
         NSScreenCaptureUsageDescription: 'Screen sharing lets SpeakerHop send eligible device audio to the speaker you select. Screen images are not recorded or transmitted.'
         NSBonjourServices: [_raop._tcp]
@@ -47,6 +47,7 @@ targets:
       - sdk: AVFoundation.framework
       - sdk: CoreMedia.framework
       - sdk: AudioToolbox.framework
+      - sdk: MediaPlayer.framework
       - sdk: libc++.tbd
   SpeakerHopUITests:
     type: bundle.ui-testing

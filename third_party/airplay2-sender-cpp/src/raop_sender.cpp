@@ -474,6 +474,7 @@ void RaopSender::start(const std::string& host, uint16_t port, const std::string
     inBuf_.clear();
     inputPrimed_ = false;
     inputUnderrunFrames_ = bufferingFrames_ = rebufferCount_ = 0;
+    recoveredAudioGaps_ = skippedLateAudioFrames_ = 0;
     silentInputFrames_ = adaptiveBufferChanges_ = trimmedSilentFrames_ = 0;
     rawAudioBytes_ = encodedAudioBytes_ = maximumEncodeMicros_ = 0;
     minimumHandoffLeadMicros_ = lastHandoffLeadMicros_ = 0;
@@ -2064,6 +2065,27 @@ void RaopSender::onPacerTick_() {
     const uint64_t elapsedNs = uint64_t(std::chrono::duration_cast<std::chrono::nanoseconds>(
         now_() - clockStart_).count());
     const uint64_t target = elapsedNs * kRaopRate / 1000000000ULL;
+    // A suspended mobile sender must not spend seconds replaying packets whose
+    // presentation deadlines already expired. Keep RTP time monotonic and abandon
+    // only obsolete input, rather than growing an unrecoverable pacing debt.
+    if (recoverLateAudio_ && target > framesSent_ + latency_) {
+        const auto resume = target / packetFrames_ * packetFrames_;
+        skippedLateAudioFrames_ += resume - framesSent_;
+        ++recoveredAudioGaps_;
+        framesSent_ = resume;
+        inBuf_.clear(); srcPhase_ = 0;
+        inputPrimed_ = false;
+        if (ring_) {
+            std::array<int16_t, 1024> discarded{};
+            size_t remaining = ring_->availableRead();
+            while (remaining > 0) {
+                const size_t take = std::min(remaining, discarded.size());
+                if (!ring_->tryPop(std::span<int16_t>(discarded.data(),take))) break;
+                remaining -= take;
+            }
+        }
+        sendSyncPacket_(false);
+    }
     int sentThisTick = 0;
     while (framesSent_ + packetFrames_ <= target
            && sentThisTick < kMaxPacketsPerTick) {
@@ -2101,6 +2123,24 @@ void RaopSender::scheduleAudio_() {
 //   1b isNotCompressed=1 . then nFrames x {L16,R16} samples MSB-first .
 //   3b end tag = 7 . zero-pad to a byte boundary.
 std::string RaopSender::encodeAlacFrame_(const int16_t* frames, int nFrames) {
+    if (nFrames == 352) {
+        // The fixed 23-bit escape header leaves seven pending bits. Pack each
+        // 16-bit PCM value with two byte writes instead of sixteen bit writes.
+        // The wire format is identical; Apple's decoder verifies it in tests.
+        std::string out(1412, '\0');
+        out[0] = char(0x20);
+        uint16_t pending = 1;
+        size_t offset = 2;
+        for (int i = 0; i < nFrames * kChannels; ++i) {
+            const uint16_t sample = uint16_t(frames[i]);
+            out[offset++] = char((pending << 1) | (sample >> 15));
+            out[offset++] = char(sample >> 7);
+            pending = sample & 0x7F;
+        }
+        out[offset++] = char((pending << 1) | 1); // first END bit
+        out[offset] = char(0xC0);               // remaining END bits, padding
+        return out;
+    }
     std::string out;
     out.reserve(size_t(nFrames) * kChannels * 2 + 8);
     uint8_t cur = 0;
@@ -2196,6 +2236,12 @@ void RaopSender::sendAudioPacket_() {
     framesSent_ += packetFrames_;
 }
 
+size_t RaopSender::queuedInputFrames() const {
+    const size_t staged = inBuf_.size() / kChannels;
+    const size_t consumed = std::min(staged, size_t(srcPhase_));
+    return (ring_ ? ring_->availableRead() / kChannels : 0) + staged - consumed;
+}
+
 size_t RaopSender::fillFrames_(int16_t* dst, size_t want) {
     const size_t wantSamples = want * kChannels;
     if (!ring_) {
@@ -2270,6 +2316,14 @@ size_t RaopSender::fillFrames_(int16_t* dst, size_t want) {
     const size_t room = kInBufMaxFrames > bufFrames
                             ? kInBufMaxFrames - bufFrames : 0;
     const size_t ringFrames = ring_->availableRead() / kChannels;
+    if (inputBufferFrames_ > 0 && !inputPrimed_) {
+        if (bufFrames + ringFrames < std::min(inputBufferFrames_, ring_->capacity() / kChannels)) {
+            std::memset(dst, 0, wantSamples * sizeof(int16_t));
+            bufferingFrames_ += want;
+            return 0;
+        }
+        inputPrimed_ = true;
+    }
     const size_t pull = std::min(room, ringFrames);
     if (pull > 0) {
         const size_t old = inBuf_.size();
@@ -2290,9 +2344,12 @@ size_t RaopSender::fillFrames_(int16_t* dst, size_t want) {
         srcPhase_ += step;
         ++produced;
     }
-    if (produced < want)
+    if (produced < want) {
         std::memset(dst + produced * kChannels, 0,
                     (want - produced) * kChannels * sizeof(int16_t));
+        inputUnderrunFrames_ += want - produced;
+        if (inputBufferFrames_ > 0) { inputPrimed_ = false; ++rebufferCount_; }
+    }
 
     // Compact: drop fully consumed frames (keep the one at floor(phase),
     // the lerp's left neighbour) and rebase the phase.

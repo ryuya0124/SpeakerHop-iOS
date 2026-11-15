@@ -174,7 +174,11 @@ public:
     bool latencyCompatibilityFallback() const { return latencyCompatibilityFallback_; }
     uint64_t inputUnderrunFrames() const { return inputUnderrunFrames_; }
     uint64_t bufferingFrames() const { return bufferingFrames_; }
+    size_t queuedInputFrames() const;
     uint64_t rebufferCount() const { return rebufferCount_; }
+    void setRecoverLateAudio(bool enabled) { recoverLateAudio_ = enabled; }
+    uint64_t recoveredAudioGaps() const { return recoveredAudioGaps_; }
+    uint64_t skippedLateAudioFrames() const { return skippedLateAudioFrames_; }
     void setCompressedAudio(bool enabled);
     uint64_t rawAudioBytes() const { return rawAudioBytes_; }
     uint64_t encodedAudioBytes() const { return encodedAudioBytes_; }
@@ -462,6 +466,8 @@ private:
     uint64_t inputUnderrunFrames_ = 0;
     uint64_t bufferingFrames_ = 0;
     uint64_t rebufferCount_ = 0;
+    bool recoverLateAudio_ = false;
+    uint64_t recoveredAudioGaps_ = 0, skippedLateAudioFrames_ = 0;
     int64_t minimumHandoffLeadMicros_ = 0, lastHandoffLeadMicros_ = 0;
     uint64_t lateHandoffPackets_ = 0, measuredHandoffPackets_ = 0;
     std::vector<int16_t> inBuf_;   // unconsumed input samples (interleaved)

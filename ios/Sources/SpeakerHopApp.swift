@@ -79,8 +79,7 @@ struct MainView: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 Section("Device playback") {
-                    Text("The device speaker uses its own volume. Lower it with the device volume buttons if you only want to hear HomePod.")
-                        .font(.caption).foregroundStyle(.secondary)
+                    DevicePlaybackControls(session: bridge.audioSession)
                 }
                 if !bridge.error.isEmpty { Section("Sharing stopped") { Text(bridge.error).foregroundStyle(.red) } }
             }.navigationTitle("SpeakerHop")
@@ -139,7 +138,12 @@ struct MainView: View {
         }.disabled(bridge.profile != 2)
     }
 
-    private var diagnostics: some View {
+    private var diagnostics: some View { DiagnosticsView(store: bridge.telemetry) }
+}
+
+private struct DiagnosticsView: View {
+    @ObservedObject var store: TelemetryStore
+    var body: some View {
         NavigationStack {
             Form {
                 Section("Measured on this device") {
@@ -151,6 +155,8 @@ struct MainView: View {
                     metric("Actual packet span", "packetMs")
                     metric("Maximum encode time", "encode")
                     metric("Maximum socket send time", "socketSend")
+                    metric("Longest sender cycle", "loopWall")
+                    metric("CPU time in that cycle", "loopCpu")
                     metric("Control TCP round trip", "rtt")
                     LabeledContent("Streaming network class", value: networkClass)
                 }
@@ -159,29 +165,33 @@ struct MainView: View {
                     metric("Receiver reported minimum", "minimum")
                     metric("Receiver reported maximum", "maximum")
                     metric("Latest send deadline lead", "lead")
-                    LabeledContent("Setup rejection", value: String((bridge.stats["rejection"] as? NSNumber)?.intValue ?? 0))
-                    LabeledContent("Compatibility fallback", value: (bridge.stats["fallback"] as? Bool) == true ? String(localized: "Active") : String(localized: "No"))
+                    LabeledContent("Setup rejection", value: String((store.values["rejection"] as? NSNumber)?.intValue ?? 0))
+                    LabeledContent("Compatibility fallback", value: (store.values["fallback"] as? Bool) == true ? String(localized: "Active") : String(localized: "No"))
                 }
                 Section("Stream health") {
-                    LabeledContent("Input peak", value: (bridge.stats["inputPeakDb"] as? NSNumber).map { String(format: "%.1f dBFS", $0.doubleValue) } ?? "—")
-                    LabeledContent("Nonzero input samples", value: String((bridge.stats["nonzeroSamples"] as? NSNumber)?.uint64Value ?? 0))
+                    LabeledContent("Input peak", value: (store.values["inputPeakDb"] as? NSNumber).map { String(format: "%.1f dBFS", $0.doubleValue) } ?? "—")
+                    LabeledContent("Nonzero input samples", value: String((store.values["nonzeroSamples"] as? NSNumber)?.uint64Value ?? 0))
+                    LabeledContent("Recovered scheduling stalls", value: String((store.values["recovered"] as? NSNumber)?.uint64Value ?? 0))
+                    LabeledContent("Skipped expired audio frames", value: String((store.values["skipped"] as? NSNumber)?.uint64Value ?? 0))
+                    LabeledContent("Receiver resend requests", value: String((store.values["resends"] as? NSNumber)?.uint64Value ?? 0))
+                    LabeledContent("Socket send errors", value: String((store.values["sendErrors"] as? NSNumber)?.uint64Value ?? 0))
                     ForEach([("Captured frames", "frames"), ("Dropped frames", "dropped"), ("Invalid audio blocks", "invalid"), ("Missing input frames", "underruns"), ("Late packets", "late")], id: \.1) { label, key in
-                        LabeledContent(LocalizedStringKey(label), value: String((bridge.stats[key] as? NSNumber)?.uint64Value ?? 0))
+                        LabeledContent(LocalizedStringKey(label), value: String((store.values[key] as? NSNumber)?.uint64Value ?? 0))
                     }
                     Text("These measurements do not establish acoustic end-to-end latency. Receiver targets and reported bounds are settings, not measurements of speaker playback. Capture block span overlaps delivery age; do not add them together.")
-                        .font(.caption).foregroundStyle(.secondary)
+                        .font(.caption).foregroundStyle(.secondary).accessibilityIdentifier("diagnostics-footer")
                 }
             }.navigationTitle("Diagnostics")
         }
     }
 
     private func metric(_ name: String, _ key: String) -> some View {
-        let value = (bridge.stats[key] as? NSNumber)?.doubleValue
-        return LabeledContent(LocalizedStringKey(name), value: value.map { $0 < 0 ? String(localized: "Unavailable") : String(format: "%.2f ms", $0) } ?? "—")
+        let value = (store.values[key] as? NSNumber)?.doubleValue
+        return LabeledContent(LocalizedStringKey(name), value: value.map { $0 < 0 && key != "lead" ? String(localized: "Unavailable") : String(format: "%.2f ms", $0) } ?? "—")
     }
 
     private var networkClass: String {
-        guard let value = (bridge.stats["networkClass"] as? NSNumber)?.intValue, value >= 0 else { return String(localized: "Unavailable") }
+        guard let value = (store.values["networkClass"] as? NSNumber)?.intValue, value >= 0 else { return String(localized: "Unavailable") }
         return value == 6 ? String(localized: "Multimedia") : String(localized: "Default")
     }
 }

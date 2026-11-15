@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import Foundation
 import CoreMedia
+import UIKit
 #if canImport(ScreenCaptureKit)
 import ScreenCaptureKit
 
@@ -21,14 +22,16 @@ final class BridgeModel: NSObject, ObservableObject {
     @Published var connecting = false
     @Published var connected = false
     @Published var volume = 0.0
-    @Published var stats: [String: Any] = [:]
+    let telemetry = TelemetryStore()
+    let audioSession = SharingAudioSession()
+    var stats: [String: Any] { telemetry.values }
     @Published var error = ""
     @Published var profile = 0
     @Published var presentation = 45.0
     @Published var receiverMinimum = 45.0
     @Published var receiverMaximum = 45.0
-    @Published var reserve = 0.0
-    @Published var packetFrames = 88
+    @Published var reserve = 2.0
+    @Published var packetFrames = 352
     @Published var compressed = false
     @Published var networkPriority = true
     private var transport = HBTransport()
@@ -38,6 +41,7 @@ final class BridgeModel: NSObject, ObservableObject {
     private var stream: SCStream?
 #endif
     private var timer: Timer?
+    private let diagnosticQueue = DispatchQueue(label: "dev.ryuya.speakerhop.diagnostics", qos: .utility)
     private var pickerRegistered = false
     private var stopping = false
     private let sourceID: String
@@ -58,12 +62,24 @@ final class BridgeModel: NSObject, ObservableObject {
             receiverMinimum = min(2000, max(45, saved["minimum"] as? Double ?? 45))
             receiverMaximum = min(2000, max(receiverMinimum, saved["maximum"] as? Double ?? 45))
             reserve = min(100, max(0, saved["reserve"] as? Double ?? 0))
-            let frames = saved["packet"] as? Int ?? 88
-            packetFrames = [44, 88, 352].contains(frames) ? frames : 88
+            let frames = saved["packet"] as? Int ?? 352
+            packetFrames = [44, 88, 352].contains(frames) ? frames : 352
             compressed = saved["compressed"] as? Bool ?? false
             networkPriority = saved["networkPriority"] as? Bool ?? true
         }
+        // Presets follow the current implementation; preserve fully manual settings.
+        if profile != 2 { applyProfile(profile) }
         timer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in self?.refresh() }
+#if targetEnvironment(simulator)
+        if ProcessInfo.processInfo.arguments.contains("--simulate-sharing") {
+            timer?.invalidate()
+            var tick = 0
+            timer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
+                tick += 1
+                self?.telemetry.update(["frames": tick * 960, "captureChunk": 20.0, "queue": Double(tick % 20)])
+            }
+        }
+#endif
     }
 
     func applyProfile(_ value: Int) {
@@ -72,8 +88,8 @@ final class BridgeModel: NSObject, ObservableObject {
         presentation = value == 0 ? 45 : 250
         receiverMinimum = presentation
         receiverMaximum = presentation
-        reserve = 0
-        packetFrames = value == 0 ? 88 : 352
+        reserve = value == 0 ? 2 : 20
+        packetFrames = 352
         compressed = false
         networkPriority = value == 0
         saveSettings()
@@ -91,6 +107,8 @@ final class BridgeModel: NSObject, ObservableObject {
 #if canImport(ScreenCaptureKit)
         let picker = SCContentSharingPicker.shared
         guard picker.isAvailable else { error = String(localized: "Screen audio sharing is unavailable on this device."); return }
+        do { try audioSession.begin() }
+        catch { self.error = error.localizedDescription; return }
         connect(selected)
         if !pickerRegistered { picker.add(self); pickerRegistered = true }
         var configuration = SCContentSharingPickerConfiguration()
@@ -140,6 +158,7 @@ final class BridgeModel: NSObject, ObservableObject {
         oldStream?.stopCapture { [oldSink] _ in _ = oldSink }
 #endif
         transport.disconnect()
+        audioSession.end()
         status = String(localized: "Not connected")
         stopping = false
     }
@@ -147,11 +166,13 @@ final class BridgeModel: NSObject, ObservableObject {
     private func refresh() {
         let latest = transport.snapshot()
         let state = (latest["state"] as? NSNumber)?.intValue ?? 0
-        if state != 0 { stats = latest }
-        connected = (latest["ready"] as? Bool) == true
+        if state != 0 { telemetry.update(latest) }
+        let isConnected = (latest["ready"] as? Bool) == true
+        if connected != isConnected { connected = isConnected }
         if connected {
-            connecting = false
-            status = capturing ? String(localized: "Sharing device audio") : String(localized: "Connected, waiting for sharing permission")
+            if connecting { connecting = false }
+            let nextStatus = capturing ? String(localized: "Sharing device audio") : String(localized: "Connected, waiting for sharing permission")
+            if status != nextStatus { status = nextStatus }
         }
         if state < 0 {
             let failure = stats["error"] as? String ?? ""
@@ -162,11 +183,19 @@ final class BridgeModel: NSObject, ObservableObject {
         if ProcessInfo.processInfo.arguments.contains("--diagnostics") {
             let url = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("diagnostics.json")
             var report = stats
+            for (key, value) in audioSession.report { report[key] = value }
             report["currentState"] = state
             report["captureActive"] = capturing
             report["connected"] = connected
+            report["sampledAt"] = Date().timeIntervalSince1970
+            report["applicationState"] = UIApplication.shared.applicationState.rawValue
+            report["thermalState"] = ProcessInfo.processInfo.thermalState.rawValue
+            report["lowPowerMode"] = ProcessInfo.processInfo.isLowPowerModeEnabled
             // Last measurements survive a disconnect, while current state stays independently clear.
-            if let data = try? JSONSerialization.data(withJSONObject: report, options: [.sortedKeys]) { try? data.write(to: url, options: .atomic) }
+            // Diagnostics IO is not on the audio path and not on the UI thread.
+            if let data = try? JSONSerialization.data(withJSONObject: report, options: [.sortedKeys]) {
+                diagnosticQueue.async { try? data.write(to: url, options: .atomic) }
+            }
         }
     }
 

@@ -10,11 +10,15 @@
 #include <mutex>
 #include <thread>
 #include <pthread/qos.h>
+#include <time.h>
 
 namespace {
 using namespace fxchain;
 struct Session {
-    RingBuffer<int16_t> ring{8192};
+    // Accommodate the entire supported 100 ms manual reserve plus source-block jitter.
+    // The producer still uses a per-session watermark, so this adds no fixed delay.
+    RingBuffer<int16_t> ring{32768};
+    int queueLimitMs=40; // initialized before publishing the session
     std::atomic<bool> stop{false}, ready{false};
     std::atomic<int> state{1}, volume{-1}, rate{48000};
     std::atomic<uint64_t> frames{0}, dropped{0}, invalid{0};
@@ -26,14 +30,22 @@ struct Session {
     std::string error;
     double queuedMs=0, encodeMs=0, presentationMs=0, minimumMs=-1, maximumMs=-1;
     double leadMs=0, packetMs=0, rttMs=-1, sendMs=0;
+    double loopWallMs=0, loopCpuMs=0, pumpHz=0;
+    uint64_t stalledLoops=0;
+    std::atomic<int> qosResult{0};
     int networkClass=-1;
     uint64_t underruns=0, late=0;
+    uint64_t recovered=0, skipped=0, resends=0, sendErrors=0;
     int rejection=0;
     bool fallback=false;
     std::thread worker;
     ~Session() { if(worker.joinable()) worker.join(); }
 };
 double hostSeconds() { return CMTimeGetSeconds(CMClockGetTime(CMClockGetHostTimeClock())); }
+double threadSeconds() {
+    timespec t{};
+    return clock_gettime(CLOCK_THREAD_CPUTIME_ID,&t)==0 ? t.tv_sec+t.tv_nsec/1e9 : -1;
+}
 }
 
 @implementation HBTransport {
@@ -46,11 +58,12 @@ double hostSeconds() { return CMTimeGetSeconds(CMClockGetTime(CMClockGetHostTime
       packetFrames:(NSInteger)packetFrames compressed:(BOOL)compressed networkPriority:(BOOL)networkPriority {
     [self disconnect];
     auto s=std::make_shared<Session>();
+    s->queueLimitMs=std::max(40,int(std::clamp((int)reserve,0,100))+20);
     std::atomic_store(&_session, s);
     std::string address=host.UTF8String, label=name.UTF8String;
     std::string id=deviceID.UTF8String, source=sourceID.UTF8String;
     s->worker=std::thread([s,address,label,id,source,port,presentation,minimum,maximum,reserve,packetFrames,compressed,networkPriority] {
-        pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0);
+        s->qosResult=pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0);
         try {
             RaopLoop loop;
             loop.setNetworkPriority(networkPriority);
@@ -72,6 +85,7 @@ double hostSeconds() { return CMTimeGetSeconds(CMClockGetTime(CMClockGetHostTime
             sender.setStrictReceiverAuth(true);
             sender.setVolumePolicy(0,100);
             sender.setDeferInputUntilReady(true);
+            sender.setRecoverLateAudio(true);
             sender.setCompressedAudio(compressed);
             sender.setAudioPacketFrames((uint32_t)packetFrames);
             sender.setIdentity(RaopIdentity{"SpeakerHop",source,"iPhone"});
@@ -84,7 +98,11 @@ double hostSeconds() { return CMTimeGetSeconds(CMClockGetTime(CMClockGetHostTime
             sender.start(address,(uint16_t)port,label);
             int rate=48000;
             bool inputReleased=false;
+            double maximumLoopWall=0, maximumLoopCpu=0;
+            uint64_t stalledLoops=0;
             auto nextStats=std::chrono::steady_clock::now();
+            auto statsBegan=nextStats;
+            uint64_t pumps=0;
             while(!s->stop.load() && s->state.load()>0) {
                 const int newRate=s->rate.load();
                 if(rate!=newRate) {
@@ -96,13 +114,24 @@ double hostSeconds() { return CMTimeGetSeconds(CMClockGetTime(CMClockGetHostTime
                 }
                 int volume=s->volume.exchange(-1);
                 if(volume>=0) sender.setVolume(volume);
-                // No staging queue, one deadline-driven network thread; 1 ms maximum idle poll.
-                loop.pump(sender,std::chrono::milliseconds(1));
+                // poll wakes on sockets or the sender's next absolute deadline.
+                // A 1 ms idle cap adds ~1000 wakeups/s without advancing an 8 ms packet deadline.
+                const bool measure=sender.transportReady();
+                const auto loopBegin=hostSeconds(), cpuBegin=threadSeconds();
+                loop.pump(sender,std::chrono::milliseconds(20));
+                ++pumps;
+                const double loopWall=(hostSeconds()-loopBegin)*1000;
+                const double cpuEnd=threadSeconds();
+                if(measure && loopWall>maximumLoopWall) {
+                    maximumLoopWall=loopWall;
+                    maximumLoopCpu=cpuBegin>=0 && cpuEnd>=cpuBegin ? (cpuEnd-cpuBegin)*1000 : -1;
+                }
+                if(measure && loopWall>=40)++stalledLoops;
                 s->ready=sender.transportReady();
                 auto now=std::chrono::steady_clock::now();
                 if(now>=nextStats) {
                     std::lock_guard lock(s->mutex);
-                    s->queuedMs=1000.0*s->ring.availableRead()/2/rate;
+                    s->queuedMs=1000.0*sender.queuedInputFrames()/rate;
                     s->encodeMs=sender.maximumEncodeMicros()/1000.0;
                     s->presentationMs=sender.presentationLatencyFrames()*1000.0/44100;
                     s->minimumMs=sender.receiverMinimumLatencyFrames()<0?-1:sender.receiverMinimumLatencyFrames()*1000.0/44100;
@@ -110,11 +139,21 @@ double hostSeconds() { return CMTimeGetSeconds(CMClockGetTime(CMClockGetHostTime
                     s->leadMs=sender.lastHandoffLeadMicros()/1000.0;
                     s->packetMs=sender.audioPacketFrames()*1000.0/44100;
                     s->underruns=sender.inputUnderrunFrames();
+                    s->loopWallMs=maximumLoopWall;
+                    s->loopCpuMs=maximumLoopCpu;
+                    s->stalledLoops=stalledLoops;
+                    const double seconds=std::chrono::duration<double>(now-statsBegan).count();
+                    s->pumpHz=seconds>0?pumps/seconds:0;
+                    pumps=0; statsBegan=now;
                     s->late=sender.lateHandoffPackets();
+                    s->recovered=sender.recoveredAudioGaps();
+                    s->skipped=sender.skippedLateAudioFrames();
+                    s->resends=sender.requestedResendPackets();
                     s->fallback=sender.latencyCompatibilityFallback();
                     const auto network=loop.networkStatistics();
                     const auto rtt=loop.tcpRttMicros(RaopTcp::Control);
                     s->networkClass=(int)network[11];
+                    s->sendErrors=network[1];
                     s->sendMs=network[2]/1000.0;
                     s->rttMs=rtt[0]<0?-1:rtt[0]/1000.0;
                     nextStats=now+std::chrono::milliseconds(200);
@@ -175,7 +214,7 @@ double hostSeconds() { return CMTimeGetSeconds(CMClockGetTime(CMClockGetHostTime
         s->nonzeroSamples.fetch_add(nonzero);
         s->rate=(int)asbd->mSampleRate;
         // Bound stale audio: discard new input on overload rather than accumulating seconds of delay.
-        if(s->ring.availableRead()>asbd->mSampleRate*2*0.04 || !s->ring.tryPush({pcm.data(),(size_t)n*2}))
+        if(s->ring.availableRead()>asbd->mSampleRate*2*s->queueLimitMs/1000 || !s->ring.tryPush({pcm.data(),(size_t)n*2}))
             s->dropped.fetch_add(n);
         else s->frames.fetch_add(n);
         s->chunkMs=n*1000.0/asbd->mSampleRate;
@@ -208,6 +247,8 @@ double hostSeconds() { return CMTimeGetSeconds(CMClockGetTime(CMClockGetHostTime
       @"queue":@(s->queuedMs),@"encode":@(s->encodeMs),@"presentation":@(s->presentationMs),
       @"minimum":@(s->minimumMs),@"maximum":@(s->maximumMs),@"lead":@(s->leadMs),@"packetMs":@(s->packetMs),
       @"rtt":@(s->rttMs),@"socketSend":@(s->sendMs),@"networkClass":@(s->networkClass),
+      @"loopWall":@(s->loopWallMs),@"loopCpu":@(s->loopCpuMs),@"pumpHz":@(s->pumpHz),@"stalledLoops":@(s->stalledLoops),@"qosResult":@(s->qosResult.load()),
+      @"recovered":@(s->recovered),@"skipped":@(s->skipped),@"resends":@(s->resends),@"sendErrors":@(s->sendErrors),
       @"underruns":@(s->underruns),@"late":@(s->late),@"rejection":@(s->rejection),@"fallback":@(s->fallback)};
 }
 - (void)dealloc { [self disconnect]; }
