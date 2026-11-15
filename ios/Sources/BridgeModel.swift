@@ -30,6 +30,7 @@ final class BridgeModel: NSObject, ObservableObject {
     @Published var reserve = 0.0
     @Published var packetFrames = 88
     @Published var compressed = false
+    @Published var networkPriority = true
     private var transport = HBTransport()
     private let audioQueue = DispatchQueue(label: "dev.ryuya.speakerhop.capture", qos: .userInteractive)
 #if canImport(ScreenCaptureKit)
@@ -60,6 +61,7 @@ final class BridgeModel: NSObject, ObservableObject {
             let frames = saved["packet"] as? Int ?? 88
             packetFrames = [44, 88, 352].contains(frames) ? frames : 88
             compressed = saved["compressed"] as? Bool ?? false
+            networkPriority = saved["networkPriority"] as? Bool ?? true
         }
         timer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in self?.refresh() }
     }
@@ -73,13 +75,14 @@ final class BridgeModel: NSObject, ObservableObject {
         reserve = 0
         packetFrames = value == 0 ? 88 : 352
         compressed = false
+        networkPriority = value == 0
         saveSettings()
     }
 
     func saveSettings() {
         UserDefaults.standard.set(["profile": profile, "presentation": presentation,
             "minimum": receiverMinimum, "maximum": receiverMaximum, "reserve": reserve,
-            "packet": packetFrames, "compressed": compressed], forKey: "timingSettings")
+            "packet": packetFrames, "compressed": compressed, "networkPriority": networkPriority], forKey: "timingSettings")
     }
 
     func start() {
@@ -112,7 +115,7 @@ final class BridgeModel: NSObject, ObservableObject {
             deviceID: speaker.deviceID, sourceID: sourceID,
             presentationMs: Int(presentation), minimumMs: Int(receiverMinimum),
             maximumMs: Int(max(receiverMinimum, receiverMaximum)), reserveMs: Int(reserve),
-            packetFrames: packetFrames, compressed: compressed)
+            packetFrames: packetFrames, compressed: compressed, networkPriority: networkPriority)
     }
 
     func updateVolume(_ value: Double) {
@@ -158,7 +161,12 @@ final class BridgeModel: NSObject, ObservableObject {
         // Optional CLI diagnostics, containing timing/counters only; no audio or screen data.
         if ProcessInfo.processInfo.arguments.contains("--diagnostics") {
             let url = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("diagnostics.json")
-            if let data = try? JSONSerialization.data(withJSONObject: stats, options: [.sortedKeys]) { try? data.write(to: url, options: .atomic) }
+            var report = stats
+            report["currentState"] = state
+            report["captureActive"] = capturing
+            report["connected"] = connected
+            // Last measurements survive a disconnect, while current state stays independently clear.
+            if let data = try? JSONSerialization.data(withJSONObject: report, options: [.sortedKeys]) { try? data.write(to: url, options: .atomic) }
         }
     }
 

@@ -47,7 +47,24 @@ targets:
       - sdk: CoreMedia.framework
       - sdk: AudioToolbox.framework
       - sdk: libc++.tbd
+  SpeakerHopUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: [UITests]
+    dependencies:
+      - target: SpeakerHop
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.ryuya.speakerhop.uitests
+        GENERATE_INFOPLIST_FILE: YES
 schemes:
+  SpeakerHopUITests:
+    build:
+      targets:
+        SpeakerHop: all
+        SpeakerHopUITests: [test]
+    test:
+      targets: [SpeakerHopUITests]
   SpeakerHop:
     build:
       targets:

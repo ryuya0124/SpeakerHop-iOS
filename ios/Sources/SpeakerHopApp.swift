@@ -112,6 +112,7 @@ struct MainView: View {
                         Text("8 ms · 352 frames").tag(352)
                     }
                     Toggle("Lossless compression", isOn: $bridge.compressed)
+                    Toggle("Prioritize streaming traffic", isOn: $bridge.networkPriority)
                     Text("Compression remains optional. Short packets are experimental; receiver compatibility is shown in Diagnostics.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
@@ -125,7 +126,8 @@ struct MainView: View {
             .disabled(bridge.connecting || bridge.connected)
             .onDisappear { bridge.saveSettings() }
             .onChange(of: [bridge.presentation, bridge.receiverMinimum, bridge.receiverMaximum,
-                bridge.reserve, Double(bridge.packetFrames), bridge.compressed ? 1 : 0]) { bridge.saveSettings() }
+                bridge.reserve, Double(bridge.packetFrames), bridge.compressed ? 1 : 0,
+                bridge.networkPriority ? 1 : 0]) { bridge.saveSettings() }
             .navigationTitle("Latency")
         }
     }
@@ -148,6 +150,9 @@ struct MainView: View {
                     metric("Sender queue", "queue")
                     metric("Actual packet span", "packetMs")
                     metric("Maximum encode time", "encode")
+                    metric("Maximum socket send time", "socketSend")
+                    metric("Control TCP round trip", "rtt")
+                    LabeledContent("Streaming network class", value: networkClass)
                 }
                 Section("Receiver negotiation") {
                     metric("Applied presentation target", "presentation")
@@ -158,6 +163,8 @@ struct MainView: View {
                     LabeledContent("Compatibility fallback", value: (bridge.stats["fallback"] as? Bool) == true ? String(localized: "Active") : String(localized: "No"))
                 }
                 Section("Stream health") {
+                    LabeledContent("Input peak", value: (bridge.stats["inputPeakDb"] as? NSNumber).map { String(format: "%.1f dBFS", $0.doubleValue) } ?? "—")
+                    LabeledContent("Nonzero input samples", value: String((bridge.stats["nonzeroSamples"] as? NSNumber)?.uint64Value ?? 0))
                     ForEach([("Captured frames", "frames"), ("Dropped frames", "dropped"), ("Invalid audio blocks", "invalid"), ("Missing input frames", "underruns"), ("Late packets", "late")], id: \.1) { label, key in
                         LabeledContent(LocalizedStringKey(label), value: String((bridge.stats[key] as? NSNumber)?.uint64Value ?? 0))
                     }
@@ -171,6 +178,11 @@ struct MainView: View {
     private func metric(_ name: String, _ key: String) -> some View {
         let value = (bridge.stats[key] as? NSNumber)?.doubleValue
         return LabeledContent(LocalizedStringKey(name), value: value.map { $0 < 0 ? String(localized: "Unavailable") : String(format: "%.2f ms", $0) } ?? "—")
+    }
+
+    private var networkClass: String {
+        guard let value = (bridge.stats["networkClass"] as? NSNumber)?.intValue, value >= 0 else { return String(localized: "Unavailable") }
+        return value == 6 ? String(localized: "Multimedia") : String(localized: "Default")
     }
 }
 

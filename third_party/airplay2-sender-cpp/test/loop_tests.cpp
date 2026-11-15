@@ -381,6 +381,8 @@ void testNetworkOptionsAndEvidence() {
     auto stats=loop.networkStatistics();CHECK(stats[9]==1,"priority request explicit");
 #if defined(__linux__)
     CHECK(stats[10]==184 && stats[11]==6,"Linux socket marking read back");
+#elif defined(__APPLE__) && defined(NET_SERVICE_TYPE_AV)
+    CHECK(stats[11]==NET_SERVICE_TYPE_AV,"Darwin applies multimedia class only to the session socket");
 #endif
     const sock_t receiver=udpLoopback();REQUIRE(receiver!=kBad,"loopback receiver");
     const std::string data="audio bytes unchanged";
@@ -402,6 +404,9 @@ void testNetworkOptionsAndEvidence() {
     REQUIRE(loop.setNetworkPriority(false),"priority can be disabled after close");
     REQUIRE(loop.udpBind(RaopUdp::Audio)!=0,"new socket bound");
     CHECK(loop.networkStatistics()[9]==0 && loop.networkStatistics()[5]==0,"fresh session has no old request or samples");
+#if defined(__APPLE__) && defined(NET_SERVICE_TYPE_AV)
+    CHECK(loop.networkStatistics()[11]!=NET_SERVICE_TYPE_AV,"disabled priority does not leak multimedia class into a new socket");
+#endif
     loop.udpClose(RaopUdp::Audio);
 }
 

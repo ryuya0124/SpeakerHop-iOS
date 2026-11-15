@@ -4,7 +4,7 @@ The app discovers speakers and sends audio you explicitly choose to share over y
 
 Your timing preferences and a random sender identifier are stored in this app's local settings. The identifier is used to identify this app to the receiver, not for cross-app tracking. You can stop sharing in the app or the system sharing controls. Local settings are removed when you delete the app, subject to your device's backup behavior.
 
-The development diagnostics option writes timing and counter values to the app's local Documents folder; it does not save audio or screen frames. Diagnostics are not automatically sent anywhere. The selected speaker and iOS may process shared content according to their own settings and policies.
+The development diagnostics option writes timing, numeric audio-level and counter values to the app's local Documents folder; it does not save audio samples or screen frames. Diagnostics are not automatically sent anywhere. The selected speaker and iOS may process shared content according to their own settings and policies.
 
 No account or paid service is required by this app. For support or privacy questions, open an issue at https://github.com/ryuya0124/SpeakerHop-iOS/issues. Do not attach private recordings or personal device information to public issues.
 
@@ -16,6 +16,6 @@ No account or paid service is required by this app. For support or privacy quest
 
 調整した設定と、送信元を示すランダムな識別子をアプリ内に保存します。この識別子はスピーカーとの接続用で、アプリをまたぐ追跡には使いません。アプリまたはiOSの共有操作から停止できます。設定の削除や復元は、端末のバックアップ設定の影響を受ける場合があります。
 
-開発用の診断オプションを指定した場合、時間やカウンターの数値をアプリ内のDocumentsフォルダへ保存します。音声や画面の保存、自動送信は行いません。iOSと接続先スピーカーには、それぞれの設定や方針が適用されます。
+開発用の診断オプションを指定した場合、時間・音声レベル・カウンターの数値をアプリ内のDocumentsフォルダへ保存します。音声サンプルや画面の保存、自動送信は行いません。iOSと接続先スピーカーには、それぞれの設定や方針が適用されます。
 
 アカウントは不要です。お問い合わせ先：https://github.com/ryuya0124/SpeakerHop-iOS/issues 。公開されるため、私的な録音や個人の端末情報を添付しないでください。

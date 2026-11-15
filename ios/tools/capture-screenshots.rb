@@ -34,23 +34,24 @@ configs.each do |role, type, runtime|
     run("xcrun", "simctl", "bootstatus", id, "-b")
     run("xcrun", "simctl", "install", id, app)
     run("xcrun", "simctl", "status_bar", id, "override", "--time", "9:41", "--dataNetwork", "wifi", "--wifiMode", "active", "--wifiBars", "3", "--batteryState", "charged", "--batteryLevel", "100")
-    %w[ja en-US].each do |locale|
-      language = locale == "ja" ? "ja" : "en"
-      dir = File.join(root, "build", role == "Duo" ? "duo-layouts" : "store-screenshots", locale)
-      FileUtils.mkdir_p(dir)
-      %w[share latency diagnostics].each_with_index do |page, i|
-        begin
-          run("xcrun", "simctl", "terminate", id, "dev.ryuya.speakerhop")
-        rescue StandardError
-          # A previously unlaunched app has nothing to terminate.
-        end
-        run("xcrun", "simctl", "launch", id, "dev.ryuya.speakerhop", "-AppleLanguages", "(#{language})", "-AppleLocale", locale, "--layout-tab", page)
-        # Allow the navigation animation to settle; image inspection is still mandatory afterward.
-        sleep 1
-        display = role == "Duo" ? ["--display=primary"] : []
-        run("xcrun", "simctl", "io", id, "screenshot", *display, File.join(dir, "#{role}-#{i+1}-#{page}.png"))
+    result = File.join(root, "build/layout-results", "#{role}.xcresult")
+    attachments = File.join(root, "build/layout-results", "#{role}-attachments")
+    FileUtils.rm_rf(result)
+    FileUtils.rm_rf(attachments)
+    run("bundle", "exec", "fastlane", "ios", "layout_test", "device:#{id}", "result:#{result}")
+    run("xcrun", "xcresulttool", "export", "attachments", "--path", result, "--output-path", attachments)
+    count = 0
+    JSON.parse(File.read(File.join(attachments, "manifest.json"))).each do |test|
+      test.fetch("attachments", []).each do |attachment|
+        match = attachment["suggestedHumanReadableName"].to_s.match(/store_(ja|en-US)_(\d+)_(share|latency|diagnostics)/)
+        next unless match
+        dir = File.join(root, "build", role == "Duo" ? "duo-layouts" : "store-screenshots", match[1])
+        FileUtils.mkdir_p(dir)
+        FileUtils.cp(File.join(attachments, attachment.fetch("exportedFileName")), File.join(dir, "#{role}-#{match[2]}-#{match[3]}.png"))
+        count += 1
       end
     end
+    raise "Expected six verified #{role} screenshots, got #{count}" unless count == 6
   ensure
     # Only the explicitly named SpeakerHop simulators are stopped.
     run("xcrun", "simctl", "shutdown", id)

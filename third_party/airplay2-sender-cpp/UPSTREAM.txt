@@ -11,3 +11,5 @@ HomePod Bridge also permits a 10 ms experimental presentation target, covered by
 Additional HomePod Bridge diagnostics measure local socket-handoff lead relative to the nominal RTP presentation deadline and count late handoffs; no network/receiver/acoustic timing is inferred.
 
 HomePod Bridge reads the control socket TCP_INFO smoothed RTT/deviation on Linux/Android for numeric diagnostics; unsupported platforms report unknown. This does not change socket traffic or pacing.
+
+SpeakerHop iOS import additionally reads Darwin TCP_CONNECTION_INFO (millisecond units converted explicitly) and can request/read back the public NET_SERVICE_TYPE_AV class on this sender's UDP sockets. It never uses the VoIP class or changes global network policy. Darwin loopback regression coverage verifies priority can be disabled without leaking to a fresh socket.

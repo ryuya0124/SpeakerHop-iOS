@@ -8,7 +8,7 @@ NS_ASSUME_NONNULL_BEGIN
           deviceID:(NSString *)deviceID sourceID:(NSString *)sourceID
     presentationMs:(NSInteger)presentation minimumMs:(NSInteger)minimum
          maximumMs:(NSInteger)maximum reserveMs:(NSInteger)reserve
-      packetFrames:(NSInteger)packetFrames compressed:(BOOL)compressed;
+      packetFrames:(NSInteger)packetFrames compressed:(BOOL)compressed networkPriority:(BOOL)networkPriority;
 - (void)appendSampleBuffer:(CMSampleBufferRef)buffer clock:(nullable CMClockRef)clock;
 - (void)setVolume:(NSInteger)volume;
 - (void)disconnect;

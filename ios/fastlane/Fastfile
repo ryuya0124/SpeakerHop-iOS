@@ -20,6 +20,32 @@ platform :ios do
     Dir.chdir(IOS_ROOT) { sh("ruby", "tools/capture-screenshots.rb") }
   end
 
+  desc "Verify the visible app and capture UI-test attachments on one owned simulator"
+  lane :layout_test do |options|
+    UI.user_error!("A simulator device and result path are required") unless options[:device] && options[:result]
+    scan(project: File.join(IOS_ROOT, "SpeakerHop.xcodeproj"), scheme: "SpeakerHopUITests",
+      destination: "platform=iOS Simulator,id=#{options[:device]}",
+      derived_data_path: File.join(IOS_ROOT, "build/SimulatorData"),
+      configuration: "Release", parallel_testing: false, disable_concurrent_testing: true,
+      result_bundle: true, result_bundle_path: options[:result],
+      output_directory: File.dirname(options[:result]), xcargs: "CODE_SIGNING_ALLOWED=NO",
+      only_testing: ["SpeakerHopUITests/StoreScreenshots/testStorePages"])
+  end
+
+  desc "Verify and install this app on one explicitly selected authorized device"
+  lane :install_device do |options|
+    UI.user_error!("Pass device: and app: explicitly") unless options[:device] && options[:app]
+    app = File.expand_path(options[:app], IOS_ROOT)
+    identifier = get_info_plist_value(path: File.join(app, "Info.plist"), key: "CFBundleIdentifier")
+    UI.user_error!("This lane only installs SpeakerHop") unless identifier == "dev.ryuya.speakerhop"
+    sh("codesign", "--verify", "--strict", app)
+    sh("xcrun", "devicectl", "device", "install", "app", "--device", options[:device], "--timeout", "30", app)
+    if options[:launch].to_s == "true"
+      sh("xcrun", "devicectl", "device", "process", "launch", "--device", options[:device],
+        "--timeout", "15", "--terminate-existing", "dev.ryuya.speakerhop", "--diagnostics")
+    end
+  end
+
   desc "Build a signed Release app for authorized physical-device debugging"
   lane :device do |options|
     prepare
@@ -61,7 +87,11 @@ platform :ios do
         value = values.fetch(key)
         File.write(File.join(dir, "#{file}.txt"), value)
       end
+      File.write(File.join(dir, "privacy_url.txt"), "https://github.com/ryuya0124/SpeakerHop-iOS/blob/main/ios/appstore/privacy.md")
     end
+    review = File.join(root, "review_information")
+    FileUtils.mkdir_p(review)
+    File.write(File.join(review, "notes.txt"), File.read(File.join(IOS_ROOT, "appstore/review-notes.md")))
   end
 
   desc "Upload metadata and verified screenshots to an editable draft; no binary or review submission"

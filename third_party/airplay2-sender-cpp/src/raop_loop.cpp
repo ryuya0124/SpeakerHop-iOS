@@ -237,6 +237,15 @@ std::array<int64_t, 2> RaopLoop::tcpRttMicros(RaopTcp channel) const {
         if (::getsockopt(socket.fd, IPPROTO_TCP, TCP_INFO, &info, &length) == 0 && info.tcpi_rtt > 0)
             return {info.tcpi_rtt, info.tcpi_rttvar};
     }
+#elif defined(__APPLE__) && defined(TCP_CONNECTION_INFO)
+    const auto& socket = d_->t(channel);
+    if (socket.fd != kBadSock && socket.connected) {
+        struct tcp_connection_info info{};
+        socklen_t length = sizeof(info);
+        // Darwin reports milliseconds; do not invent sub-ms precision from a rounded zero.
+        if (::getsockopt(socket.fd, IPPROTO_TCP, TCP_CONNECTION_INFO, &info, &length) == 0 && info.tcpi_srtt > 0)
+            return {int64_t(info.tcpi_srtt) * 1000, int64_t(info.tcpi_rttvar) * 1000};
+    }
 #else
     (void)channel;
 #endif
@@ -361,11 +370,17 @@ uint16_t RaopLoop::udpBind(RaopUdp which) {
     if (local.port == 0) { closeSocket(fd); return 0; }
     u.fd = fd;
     if(d_->priority) {
+#if defined(__APPLE__) && defined(SO_NET_SERVICE_TYPE) && defined(NET_SERVICE_TYPE_AV)
+        // Public per-socket multimedia streaming class; never request the VoIP class.
+        const int service = NET_SERVICE_TYPE_AV;
+        ::setsockopt(fd, SOL_SOCKET, SO_NET_SERVICE_TYPE, &service, sizeof(service));
+#else
         const int expeditedForwarding=46<<2;
         ::setsockopt(fd,IPPROTO_IP,IP_TOS,reinterpret_cast<const char*>(&expeditedForwarding),sizeof(expeditedForwarding));
 #if defined(__linux__)
         const int voicePriority=6;
         ::setsockopt(fd,SOL_SOCKET,SO_PRIORITY,&voicePriority,sizeof(voicePriority));
+#endif
 #endif
     }
     socklen_t optionSize=sizeof(int);
@@ -374,6 +389,9 @@ uint16_t RaopLoop::udpBind(RaopUdp which) {
     optionSize=sizeof(int);
     if(::getsockopt(fd,SOL_SOCKET,SO_PRIORITY,&u.priority,&optionSize)!=0)u.priority=-1;
     if(which==RaopUdp::Audio)u.tx.open(fd);
+#elif defined(__APPLE__) && defined(SO_NET_SERVICE_TYPE)
+    optionSize=sizeof(int);
+    if(::getsockopt(fd,SOL_SOCKET,SO_NET_SERVICE_TYPE,&u.priority,&optionSize)!=0)u.priority=-1;
 #endif
     return local.port;
 }

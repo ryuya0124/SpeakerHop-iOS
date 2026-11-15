@@ -32,6 +32,12 @@
 "2 ms · 88 frames" = "2 ms・88フレーム";
 "8 ms · 352 frames" = "8 ms・352フレーム";
 "Lossless compression" = "ロスレス圧縮";
+"Prioritize streaming traffic" = "音声送信を優先";
+"Maximum socket send time" = "最大ソケット送信処理時間";
+"Control TCP round trip" = "制御用TCPの往復時間";
+"Streaming network class" = "送信に適用された優先度";
+"Multimedia" = "音声・映像向け";
+"Default" = "標準";
 "Compression remains optional. Short packets are experimental; receiver compatibility is shown in Diagnostics." = "圧縮は任意です。短いパケットは実験的な機能です。受信側の応答は診断画面で確認できます。";
 "Measured on this device" = "端末内の計測値";
 "Capture delivery age" = "取り込みデータの到着時点の経過";
@@ -51,6 +57,8 @@
 "Active" = "有効";
 "No" = "なし";
 "Stream health" = "送信状態";
+"Input peak" = "入力音声のピーク";
+"Nonzero input samples" = "無音でない入力サンプル数";
 "Captured frames" = "取り込みフレーム数";
 "Dropped frames" = "破棄したフレーム数";
 "Invalid audio blocks" = "非対応の音声ブロック数";
