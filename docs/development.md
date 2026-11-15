@@ -12,7 +12,7 @@ Full-display selection follows Apple's iOS sample (`picker.present()`) and the b
 
 - fastlane Release builds succeeded for physical iOS and Apple Silicon simulators.
 - Existing development identity/profile were validated, and fastlane `resign` produced an IPA whose application passed strict codesign verification. Installed on the paired iPhone and iPad; confirmed iPhone launch. The iPad was locked during its initial launch check, so no iPad runtime-capture result is claimed.
-- macOS native protocol, codec, timing and real loopback socket suites: 4/4 passed, including readback of Darwin multimedia service class and isolation after disabling priority. Linux native CI passed for the initial implementation; rerun it after subsequent transport changes.
+- macOS native protocol, codec, timing and real loopback socket suites: 4/4 passed, including readback of Darwin multimedia service class and isolation after disabling priority. Linux CI also passed all four suites for transport update `6d2a910` (GitHub Actions run `43733302591`).
 - UI screenshots use fastlane `scan`, XCUITest navigation-bar/foreground assertions and xcresult attachments. Three owned simulators each passed the screen-capture test, producing 18 actual app screenshots: Share, Latency and Diagnostics in English/Japanese for iPhone, iPad and iPhone Duo outer display. Earlier shell-only captures included system prompts/launch animations and were replaced; do not upload those earlier files.
 - The final waveform icon is a 1024×1024 opaque RGB PNG, visually inspected and checked for nonempty image content. A preliminary AppKit bitmap generator produced black output; it was replaced with an explicitly validated Core Graphics context.
 
