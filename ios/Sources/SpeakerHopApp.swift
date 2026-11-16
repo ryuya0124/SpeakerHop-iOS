@@ -194,13 +194,18 @@ private struct DiagnosticsView: View {
                     LabeledContent("Receiver resend requests", value: String((store.values["resends"] as? NSNumber)?.uint64Value ?? 0))
                     LabeledContent("Socket send errors", value: String((store.values["sendErrors"] as? NSNumber)?.uint64Value ?? 0))
                     ForEach([("Captured frames", "frames"), ("Dropped frames", "dropped"), ("Invalid audio blocks", "invalid"), ("Missing input frames", "underruns"), ("Late packets", "late")], id: \.1) { label, key in
-                        LabeledContent(LocalizedStringKey(label), value: String((store.values[key] as? NSNumber)?.uint64Value ?? 0))
+                        LabeledContent(LocalizedStringKey(label)) {
+                            Text(String((store.values[key] as? NSNumber)?.uint64Value ?? 0))
+                                .accessibilityIdentifier(key + "-counter")
+                        }
                     }
                     Text("These measurements do not establish acoustic end-to-end latency. Receiver targets and reported bounds are settings, not measurements of speaker playback. Capture block span overlaps delivery age; do not add them together.")
                         .font(.caption).foregroundStyle(.secondary).accessibilityIdentifier("diagnostics-footer")
                 }
             }.navigationTitle("Diagnostics")
         }
+        .onAppear { store.beginDisplay() }
+        .onDisappear { store.endDisplay() }
     }
 
     private func metric(_ name: String, _ key: String) -> some View {

@@ -93,3 +93,23 @@ The former late-recovery path discarded the entire source queue, including audio
 All four native suites passed on the Mac. Added decoded-waveform checks cover 44.1/48 kHz phase continuity after a 600 ms stall at 45/500 ms targets, trimming across staging/ring boundaries, and continued 20 ms capture during a 600 ms sender stall. The 500 ms scenario retains future audio without producer overflow or extra underruns after catch-up. These deterministic protocol tests do not prove real HomePod continuity or acoustic latency. UI tests passed for saved-mode migration/persistence and live diagnostics scrolling. The device archive and simulator Release builds succeeded through fastlane. Build 4 is a development build; build 3 remains the submitted TestFlight binary.
 
 Build 4 passed strict signature verification and installed on the authorized iPhone and iPad. The iPhone launch request was refused because the device was locked; a fresh physical-device startup/capture and listening comparison remains pending user unlock and renewed sharing consent. The build-4 Japanese/English iPhone screenshots were inspected for the four-profile selector and Stable defaults. A later TestFlight readback still showed build 3 `IN_BETA_TESTING` internally and `WAITING_FOR_BETA_REVIEW` externally.
+
+## Development build 5: footprint and idle work
+
+Disconnected apps no longer create the 250 ms transport-polling timer. Connecting starts it, and stop/failure invalidates it. Telemetry retains current transport state independently of SwiftUI publication; only visible diagnostics windows receive UI updates, and reopening catches up immediately. Visibility is counted across windows. Optional CLI diagnostics now serialize JSON on the utility queue, write at most once per second during a connection, and write once at startup/stop rather than continuing periodically while idle. This diagnostic-file path is only enabled by the development launch argument.
+
+Uncompressed ALAC reuses a sender-owned payload scratch string. RTP packets are assembled directly in their retained retransmission slot, eliminating a temporary allocation and full packet copy; the history duration, audio buffers, receiver targets and wire format are preserved. Swift Release builds use `-Osize`; native codec/transport libraries retain their previous performance flags.
+
+Measurements on the same Mac/toolchain, comparing development builds 4 and 5:
+
+| Measure | Build 4 | Build 5 |
+| --- | ---: | ---: |
+| Signed development app files, summed bytes | 927,469 | 911,485 |
+| Signed executable bytes | 761,440 | 745,456 |
+| Idle diagnostic-file changes in 20 observations spaced 250 ms apart | 19 | 0 |
+| Counted C++ allocations over 3,072 steady-state encrypted 352-frame packets | 37,058 | 30,914 |
+| Requested bytes in those counted C++ allocations | 35,571,168 | 26,748,360 |
+
+The signed bundle is about 1.72% smaller. The packet harness counts `operator new` calls only while the sender ticks, after a full retransmission-history warm-up, with the same fake IO/receiver and source packets. It observed two fewer allocations per audio packet (about 16.6% fewer calls) and about 24.8% fewer requested allocation bytes. Those are host allocation-traffic measurements, not peak iPhone RAM, energy use, CPU speedup, App Store download size or acoustic latency measurements.
+
+All four native suites passed, including a new encrypted compressed/uncompressed waveform and exact retransmission check across history-slot wraparound. The fastlane telemetry smoke test confirmed that 1,000 hidden updates cause zero UI publications while latest-state retention, catch-up and multiple visible windows remain correct. The simulator UI regression verified both continuing live values and scroll-position preservation. Device and simulator Release builds succeeded. The development IPA passed strict signature verification and installed on iPad. The iPhone was unavailable to CoreDevice before installation, so its build-5 update and post-update runtime verification remain pending reconnection; it previously received build 4. No audio was played for these footprint tests. TestFlight build 3 remains unchanged.

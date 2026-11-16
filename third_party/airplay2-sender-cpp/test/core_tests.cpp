@@ -1920,6 +1920,49 @@ void testLowLatencyTimeline() {
     }
 }
 
+void testRetransmitStorageReuse() {
+    g_test = "encrypted audio and retransmissions survive history-slot reuse";
+    for (bool compressed : {false, true}) {
+        Rig r;
+        r.sender->setInputBufferFrames(0);
+        r.sender->setCompressedAudio(compressed);
+        runAp2Handshake(r, FakeReceiver::Mode::Ap2Transient, RaopDeviceInfo::Auth::HapTransient);
+        REQUIRE(r.launchedOk && *r.launchedOk, "encrypted stream ready");
+        r.io.takeUdp();
+        const auto origin = r.now;
+        std::string original, retained, replacement;
+        for (uint64_t i = 0; i < 1030; ++i) {
+            std::vector<int16_t> samples(704);
+            for (size_t j = 0; j < samples.size(); ++j)
+                samples[j] = i % 3 ? int16_t(i * 97 + j * 31) : 0;
+            REQUIRE(r.ring.tryPush(samples), "source packet queued");
+            r.now = origin + std::chrono::ceil<Clock::duration>(std::chrono::nanoseconds(
+                ((i + 1) * 352 * 1000000000ULL + 44099) / 44100));
+            r.sender->tick();
+            auto packets = r.io.takeUdp();
+            auto audio = std::find_if(packets.begin(), packets.end(), [](const auto& p) { return p.s == RaopUdp::Audio; });
+            REQUIRE(audio != packets.end(), "one audio deadline reached");
+            auto decoded = r.rx.decodeAudio(audio->data);
+            CHECK(decoded && *decoded == samples, "scratch reuse preserves each decrypted stereo sample");
+            if (i == 0) original = audio->data;
+            if (i == 1023) retained = audio->data;
+            if (i == 1024) replacement = audio->data;
+        }
+        for (const auto& packet : {original, retained, replacement}) {
+            const uint16_t seq = be16(packet, 2);
+            std::string request(8, '\0');
+            request[0] = char(0x80); request[1] = char(0xD5);
+            request[4] = char(seq >> 8); request[5] = char(seq); request[7] = 1;
+            r.sender->onUdpDatagram(RaopUdp::Control, spanOf(request), {r.peerIp, r.rx.ap2ControlPort});
+            const auto replies = r.io.takeUdp();
+            if (packet == original) CHECK(replies.empty(), "expired slot never retransmits newer audio under the old sequence");
+            else CHECK(replies.size() == 1 && replies.front().data.substr(4) == packet,
+                "retained ciphertext, nonce and header retransmit byte-for-byte after slot reuse");
+        }
+        r.sender->stop();
+    }
+}
+
 void testShortAudioPackets() {
     g_test = "AP2 partial ALAC packets without changing the negotiated maximum";
     for (bool compressed : {false,true}) for (uint32_t shortFrames : {44u,88u}) {
@@ -2362,6 +2405,7 @@ int main() {
     testAp2LatencyNegotiation();
     testIndependentReceiverTiming();
     testShortAudioPackets();
+    testRetransmitStorageReuse();
     testZeroReserveStaleSilence();
     testDeferredCaptureStart();
     testCompressedAp2Audio();

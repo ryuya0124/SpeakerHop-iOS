@@ -49,6 +49,11 @@ final class StoreScreenshots: XCTestCase {
             app.swipeUp()
         }
         XCTAssertTrue(footer.isHittable,"Live diagnostics can scroll to the last row")
+        let frames = app.staticTexts["frames-counter"]
+        XCTAssertTrue(frames.isHittable)
+        let previous = frames.label
+        let updating = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in frames.label != previous }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [updating], timeout: 3), .completed, "Visible diagnostics stay live")
         let reset=XCTNSPredicateExpectation(predicate:NSPredicate { _,_ in !footer.isHittable },object:nil)
         reset.isInverted=true
         XCTAssertEqual(XCTWaiter.wait(for:[reset],timeout:3),.completed,"Metric updates preserve scroll position")

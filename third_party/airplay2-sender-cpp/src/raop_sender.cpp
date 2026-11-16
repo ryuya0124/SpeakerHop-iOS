@@ -546,6 +546,7 @@ void RaopSender::stop() {
     releaseSockets_();
     // Free the backlog payloads (~1.4 MB when full).
     for (auto& b : backlog_) std::string().swap(b);
+    std::string().swap(audioPayload_);
     backlogSeq_.assign(backlog_.size(), -1);
     info_("Cast: RAOP session stopped");
 }
@@ -625,6 +626,7 @@ void RaopSender::onTcpClosed(RaopTcp ch, const std::string& reason) {
     stopTimers_();
     releaseSockets_();
     for (auto& b : backlog_) std::string().swap(b);
+    std::string().swap(audioPayload_);
     backlogSeq_.assign(backlog_.size(), -1);
     info_("Cast: RAOP connection closed by the device");
     if (wasStarting && events_.launched)
@@ -2127,12 +2129,13 @@ void RaopSender::scheduleAudio_() {
 //   1b hasSize=0 (use cookie's default 352) . 2b wastedBytes=0 .
 //   1b isNotCompressed=1 . then nFrames x {L16,R16} samples MSB-first .
 //   3b end tag = 7 . zero-pad to a byte boundary.
-std::string RaopSender::encodeAlacFrame_(const int16_t* frames, int nFrames) {
+void RaopSender::encodeAlacFrame_(std::string& out, const int16_t* frames, int nFrames) {
+    out.clear();
     if (nFrames == 352) {
         // The fixed 23-bit escape header leaves seven pending bits. Pack each
         // 16-bit PCM value with two byte writes instead of sixteen bit writes.
         // The wire format is identical; Apple's decoder verifies it in tests.
-        std::string out(1412, '\0');
+        out.resize(1412, '\0');
         out[0] = char(0x20);
         uint16_t pending = 1;
         size_t offset = 2;
@@ -2144,9 +2147,8 @@ std::string RaopSender::encodeAlacFrame_(const int16_t* frames, int nFrames) {
         }
         out[offset++] = char((pending << 1) | 1); // first END bit
         out[offset] = char(0xC0);               // remaining END bits, padding
-        return out;
+        return;
     }
-    std::string out;
     out.reserve(size_t(nFrames) * kChannels * 2 + 8);
     uint8_t cur = 0;
     int filled = 0;   // bits currently in `cur` (0..7)
@@ -2167,7 +2169,6 @@ std::string RaopSender::encodeAlacFrame_(const int16_t* frames, int nFrames) {
         put(uint16_t(frames[i]), 16);   // 16-bit sample, MSB-first
     put(7, 3);    // END element tag
     if (filled > 0) { cur = uint8_t(cur << (8 - filled)); out += char(cur); }
-    return out;
 }
 
 void RaopSender::setCompressedAudio(bool enabled) {
@@ -2192,13 +2193,14 @@ void RaopSender::sendAudioPacket_() {
     //  * AP2 realtime (type 0x60) is HARDCODED ALAC on the receiver -> send an
     //    uncompressed-ALAC frame (#90).
     //  * AP1 RAOP announces L16 (RFC 3551) -> BIG-endian s16 raw PCM.
-    std::string payload;
+    auto& payload = audioPayload_;
+    payload.clear();
     if (ap2_ && ap2_->encryptAudio) {
         const auto begin = Clock::now();
         if (alacEncoder_) payload = alacEncoder_->encode(frames, packetFrames_);
         // Never expand the existing packet or send an invalid codec result.
         if (payload.empty() || payload.size() > payloadBytes + 8)
-            payload = encodeAlacFrame_(frames, int(packetFrames_));
+            encodeAlacFrame_(payload, frames, int(packetFrames_));
         maximumEncodeMicros_ = std::max(maximumEncodeMicros_, static_cast<uint64_t>(
             std::chrono::duration_cast<std::chrono::microseconds>(Clock::now() - begin).count()));
         rawAudioBytes_ += payloadBytes;
@@ -2216,7 +2218,11 @@ void RaopSender::sendAudioPacket_() {
     // encrypted (AAD = header[4..12], trailing 8-byte nonce). AP1 = identity.
     const std::string wirePayload = encryptAudioPayload_(header, payload);
 
-    std::string pkt = header;
+    // Build directly in the retained retransmit slot. Reuse its allocation on
+    // wraparound instead of allocating a packet and then copying it into history.
+    const int slot = seq_ & (backlog_.size() - 1);
+    auto& pkt = backlog_[slot];
+    pkt.assign(header);
     pkt += wirePayload;
     io_.udpSend(RaopUdp::Audio, RaopEndpoint{hostIp_, serverPort_}, spanOf(pkt));
 
@@ -2232,8 +2238,6 @@ void RaopSender::sendAudioPacket_() {
     if (lastHandoffLeadMicros_ < 0) ++lateHandoffPackets_;
 
     // Retransmit backlog (the receiver asks by seq via type 0x55).
-    const int slot = seq_ & (backlog_.size() - 1);
-    backlog_[slot] = pkt;
     backlogSeq_[slot] = seq_;
 
     firstAudio_ = false;

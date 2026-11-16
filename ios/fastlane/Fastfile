@@ -5,6 +5,16 @@ default_platform(:ios)
 IOS_ROOT = File.expand_path("..", __dir__)
 
 platform :ios do
+  desc "Verify hidden diagnostics avoid UI work while visible windows remain current"
+  lane :telemetry_test do
+    Dir.chdir(IOS_ROOT) do
+      FileUtils.mkdir_p("build")
+      sh("xcrun", "--sdk", "macosx", "swiftc", "-O", "Sources/TelemetryStore.swift",
+        "Tests/telemetry-smoke.swift", "-o", "build/telemetry-smoke")
+      sh("build/telemetry-smoke")
+    end
+  end
+
   desc "Exercise native audio deadlines and restore thread policy without playing audio"
   lane :scheduling_test do
     Dir.chdir(IOS_ROOT) do

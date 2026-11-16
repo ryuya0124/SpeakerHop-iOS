@@ -24,7 +24,7 @@ final class BridgeModel: NSObject, ObservableObject {
     @Published var volume = 0.0
     let telemetry = TelemetryStore()
     let audioSession = SharingAudioSession()
-    var stats: [String: Any] { telemetry.values }
+    var stats: [String: Any] { telemetry.latest }
     @Published var error = ""
     @Published var profile = 1
     @Published var presentation = 1000.0
@@ -44,6 +44,8 @@ final class BridgeModel: NSObject, ObservableObject {
 #endif
     private var timer: Timer?
     private let diagnosticQueue = DispatchQueue(label: "dev.ryuya.speakerhop.diagnostics", qos: .utility)
+    private let diagnosticsEnabled = ProcessInfo.processInfo.arguments.contains("--diagnostics")
+    private var nextDiagnosticWrite = 0.0
     private var pickerRegistered = false
     private var stopping = false
     private let sourceID: String
@@ -82,7 +84,7 @@ final class BridgeModel: NSObject, ObservableObject {
         }
         // Presets follow the current implementation; preserve fully manual settings.
         if profile != 2 { applyProfile(profile) }
-        timer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in self?.refresh() }
+        refresh(writeImmediately: true)
 #if targetEnvironment(simulator)
         if ProcessInfo.processInfo.arguments.contains("--simulate-sharing") {
             timer?.invalidate()
@@ -147,6 +149,9 @@ final class BridgeModel: NSObject, ObservableObject {
             presentationMs: Int(presentation), minimumMs: Int(receiverMinimum),
             maximumMs: Int(max(receiverMinimum, receiverMaximum)), reserveMs: Int(reserve),
             packetFrames: packetFrames, compressed: compressed, networkPriority: networkPriority)
+        timer?.invalidate()
+        timer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in self?.refresh() }
+        timer?.tolerance = 0.05
     }
 
     func updateVolume(_ value: Double) {
@@ -157,6 +162,8 @@ final class BridgeModel: NSObject, ObservableObject {
     func stop() {
         guard !stopping else { return }
         stopping = true
+        timer?.invalidate()
+        timer = nil
         transport.setVolume(0)
         volume = 0
         capturing = false
@@ -174,9 +181,10 @@ final class BridgeModel: NSObject, ObservableObject {
         audioSession.end()
         status = String(localized: "Not connected")
         stopping = false
+        refresh(writeImmediately: true)
     }
 
-    private func refresh() {
+    private func refresh(writeImmediately: Bool = false) {
         let latest = transport.snapshot()
         let state = (latest["state"] as? NSNumber)?.intValue ?? 0
         if state != 0 { telemetry.update(latest) }
@@ -191,9 +199,12 @@ final class BridgeModel: NSObject, ObservableObject {
             let failure = stats["error"] as? String ?? ""
             error = failure.isEmpty ? String(localized: "The speaker disconnected. Sharing has stopped.") : failure
             stop()
+            return
         }
         // Optional CLI diagnostics, containing timing/counters only; no audio or screen data.
-        if ProcessInfo.processInfo.arguments.contains("--diagnostics") {
+        let now = ProcessInfo.processInfo.systemUptime
+        if diagnosticsEnabled && (writeImmediately || now >= nextDiagnosticWrite) {
+            nextDiagnosticWrite = now + 1
             let url = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("diagnostics.json")
             var report = stats
             for (key, value) in audioSession.report { report[key] = value }
@@ -206,8 +217,10 @@ final class BridgeModel: NSObject, ObservableObject {
             report["lowPowerMode"] = ProcessInfo.processInfo.isLowPowerModeEnabled
             // Last measurements survive a disconnect, while current state stays independently clear.
             // Diagnostics IO is not on the audio path and not on the UI thread.
-            if let data = try? JSONSerialization.data(withJSONObject: report, options: [.sortedKeys]) {
-                diagnosticQueue.async { try? data.write(to: url, options: .atomic) }
+            diagnosticQueue.async {
+                if let data = try? JSONSerialization.data(withJSONObject: report, options: [.sortedKeys]) {
+                    try? data.write(to: url, options: .atomic)
+                }
             }
         }
     }

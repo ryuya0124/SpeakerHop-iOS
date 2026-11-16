@@ -363,7 +363,7 @@ private:
     void startAudioClock_();
     void scheduleAudio_();
     void sendAudioPacket_();
-    std::string encodeAlacFrame_(const int16_t* frames, int nFrames);   // #90 ALAC, one 352-frame packet
+    void encodeAlacFrame_(std::string& out, const int16_t* frames, int nFrames);
     size_t fillFrames_(int16_t* dst, size_t want); // ring -> 44.1 kHz frames
     void discardInputFrames_(double sourceFrames);
     void sendSyncPacket_(bool first);
@@ -484,6 +484,7 @@ private:
     // -- retransmit backlog (last 1024 packets, slot = seq & 0x3FF) ---
     std::vector<std::string> backlog_;
     std::vector<int32_t>     backlogSeq_;
+    std::string audioPayload_; // sender-thread scratch, reused between packets
 
     uint64_t metadataResponses_ = 0;
     int metadataResponseCode_ = 0;
